@@ -1,0 +1,6 @@
+# Game-derived files stay local: they come from the player's own install
+ref/
+dist/
+**/bin/
+**/obj/
+.DS_Store
