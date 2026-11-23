@@ -36,13 +36,15 @@ namespace TestTrailer
     // the mass on the ball.
     internal sealed class Layout
     {
-        public const float TandemSpacing = 0.9f, TyreGap = 0.04f, Tongue = 0.11f;
+        public const float TandemSpacing = 0.9f, TandemGap = 0.12f, TyreGap = 0.04f, Tongue = 0.11f;
         public const float BarHalf = 0.05f, HeadLength = 0.2f, Chamfer = 0.25f;
         public const float Springs = 0.15f, Frame = 0.12f, FenderGap = 0.13f, MaxStep = 0.6f;
+        public const float ChassisShare = 0.20f, ShellShare = 0.15f, LoadShare = 0.65f;
 
         public readonly Preset Preset;
         public readonly WheelSpec Wheels;
         public readonly float Ground, AxleY, RailBottom, LineY, FloorY, Step, StepStart, FenderY, Front, Back, AxleZ, WheelX, HubY, RailX;
+        public readonly float ComTarget, LoadHeight, Spacing;
         public readonly float[] Axles;
         public readonly N3 BodyCentre, BodySize, Com;
         public readonly bool Chamfered;
@@ -65,18 +67,32 @@ namespace TestTrailer
             Back = Front - preset.Length;
             BodyCentre = new N3(0f, FloorY + preset.Height / 2f, (Front + Back) / 2f);
             BodySize = new N3(preset.Width, preset.Height, preset.Length);
-            // The centre of mass low in the box: a third of its height over the floor, a quarter for L
-            float comHeight = preset.Axles > 1 ? preset.Height / 4f : preset.Height / 3f;
-            Com = new N3(0f, FloorY + comHeight, BodyCentre.Z);
+            // The weight low (spec 10), the mass as it is: the chassis (frame, axles, drawbar, floor) at the rails' middle,
+            // the shell (walls, roof) at the box's centre, the load packed on the floor as a box of the body's width and
+            // length, as high as puts the whole at the floor + 0.2 of the box's height (S: 0.15)
+            ComTarget = (preset.Name == "S" ? 0.15f : 0.2f) * preset.Height;
+            float loadMiddle = (ComTarget - ChassisShare * (LineY - FloorY) - ShellShare * preset.Height / 2f) / LoadShare;
+            LoadHeight = Math.Clamp(2f * loadMiddle, 0.05f, preset.Height);
+            float comY = ChassisShare * LineY + ShellShare * (FloorY + preset.Height / 2f) + LoadShare * (FloorY + LoadHeight / 2f);
+            Com = new N3(0f, comY, BodyCentre.Z);
             // tongue share = (com z - axle z) / (0 - axle z)  =>  axle z = com z / (1 - share)
             AxleZ = Com.Z / (1f - Tongue);
-            Axles = preset.Axles > 1 ? new[] { AxleZ + TandemSpacing / 2f, AxleZ - TandemSpacing / 2f } : new[] { AxleZ };
+            // A tandem's axles at least 0.9 m apart, further for big wheels: the car's wheel's diameter and 0.12 m between
+            // the tyres (the Mammoth's 1.04 m wheels overlapped by 0.14 m at 0.9)
+            Spacing = Math.Max(TandemSpacing, 2f * wheels.Radius + TandemGap);
+            Axles = preset.Axles > 1 ? new[] { AxleZ + Spacing / 2f, AxleZ - Spacing / 2f } : new[] { AxleZ };
             float beside = preset.Width / 2f + TyreGap + wheels.Width / 2f;
             // L: the car's own track, or the body's width and a tyre, whichever is wider
             WheelX = preset.Axles > 1 ? Math.Max(beside, Math.Max(wheels.Track, preset.Width + wheels.Width) / 2f) : beside;
             RailX = preset.Width / 2f - 0.2f;
             Chamfered = preset.Name != "S";
         }
+
+        // The lower edges' chamfer (M and L), and where the frame's rails end: square, as long as the body's flat bottom
+        // (where the chamfers meet the floor); S's rails run full length. The ends stay square for lamps or shackles later.
+        public float ChamferSize => Chamfered ? Math.Min(Chamfer, Preset.Height / 3f) : 0f;
+        public float RailFront => Front - ChamferSize;
+        public float RailBack => Back + ChamferSize;
 
         public float TonguePercent => 100f * (Com.Z - AxleZ) / (0f - AxleZ);
 
@@ -119,24 +135,37 @@ namespace TestTrailer
         // The body (its lower front and rear edges chamfered on M and L) on its frame rails, the Z drawbar from the
         // frame to the coupling head (its tip on the origin), the spring hangers under the rails, a fender over each
         // side's wheels. The axles and their springs are drawn with the wheels (AxleLook), as they move with them.
+        // The body's side profile in (z, y), going round: front top, front low, (chamfer), back low, (chamfer), back top
+        public static List<(float z, float y)> Profile(Layout l)
+        {
+            float bottom = l.FloorY, top = l.FloorY + l.Preset.Height, c = l.ChamferSize;
+            if (c <= 0f)
+                return new List<(float z, float y)> { (l.Front, top), (l.Front, bottom), (l.Back, bottom), (l.Back, top) };
+            return new List<(float z, float y)>
+            {
+                (l.Front, top), (l.Front, bottom + c), (l.Front - c, bottom), (l.Back + c, bottom), (l.Back, bottom + c), (l.Back, top),
+            };
+        }
+
+        // The collider's mesh: the chamfered body exactly (a convex prism), for a convex MeshCollider (spec 10)
+        public static Mesh Hull(Layout l)
+        {
+            var shape = new Shape();
+            shape.Prism(Profile(l), l.Preset.Width / 2f);
+            return ToMesh(shape, "TestTrailer hull");
+        }
+
         public static Shape Body(Layout l)
         {
             var shape = new Shape();
             var p = l.Preset;
-            float bottom = l.FloorY, top = l.FloorY + p.Height, c = l.Chamfered ? Math.Min(Layout.Chamfer, p.Height / 3f) : 0f;
-            // The side profile in (z, y), going round: front top, front low, (chamfer), back low, (chamfer), back top
-            var profile = new List<(float z, float y)>
-            {
-                (l.Front, top), (l.Front, bottom + c), (l.Front - c, bottom), (l.Back + c, bottom), (l.Back, bottom + c), (l.Back, top),
-            };
-            if (c <= 0f)
-                profile = new List<(float z, float y)> { (l.Front, top), (l.Front, bottom), (l.Back, bottom), (l.Back, top) };
-            shape.Prism(profile, p.Width / 2f);
-            // The frame: two rails under the body, 0.12 m deep, from its back to its front, a cross member at each end
+            shape.Prism(Profile(l), p.Width / 2f);
+            // The frame: two rails under the body's flat bottom (spec 10: as long as it, square ends), 0.12 m deep, a cross
+            // member at each end
             float railY = l.RailBottom + Layout.Frame / 2f;
             foreach (float side in new[] { -1f, 1f })
-                shape.Box(new N3(side * l.RailX, railY, (l.Front + l.Back) / 2f), new N3(0.04f, Layout.Frame / 2f, p.Length / 2f));
-            foreach (float z in new[] { l.Front - 0.04f, l.Back + 0.04f })
+                shape.Box(new N3(side * l.RailX, railY, (l.RailFront + l.RailBack) / 2f), new N3(0.04f, Layout.Frame / 2f, (l.RailFront - l.RailBack) / 2f));
+            foreach (float z in new[] { l.RailFront - 0.04f, l.RailBack + 0.04f })
                 shape.Box(new N3(0f, railY, z), new N3(l.RailX, Layout.Frame / 2f - 0.01f, 0.04f));
             // The Z drawbar: level at the drawbar's line from the frame's front, a 45° step to the coupling's height,
             // level again for the last 0.2 m into the coupling head
@@ -146,11 +175,11 @@ namespace TestTrailer
             {
                 // the two rods overlap by the bar's half width at the bend, so it shows no notch
                 var along = N3.Normalize(high - low);
-                shape.Rod(new N3(0f, l.LineY, l.Front - 0.04f), low + new N3(0f, 0f, Layout.BarHalf), Layout.BarHalf);
+                shape.Rod(new N3(0f, l.LineY, l.RailFront - 0.04f), low + new N3(0f, 0f, Layout.BarHalf), Layout.BarHalf);
                 shape.Rod(low - along * Layout.BarHalf, high, Layout.BarHalf);
             }
             else
-                shape.Rod(new N3(0f, l.LineY, l.Front - 0.04f), high, Layout.BarHalf);
+                shape.Rod(new N3(0f, l.LineY, l.RailFront - 0.04f), high, Layout.BarHalf);
             shape.Box(new N3(0f, 0f, -Layout.HeadLength / 2f), new N3(0.06f, 0.05f, Layout.HeadLength / 2f));
             // The spring hangers: under the rails at each spring's ends, from the rails down to the springs' top at rest
             foreach (float z in l.Axles)
@@ -418,8 +447,8 @@ namespace TestTrailer
                 }
         }
 
-        // A prism across the trailer: a convex side profile in (z, y), from -halfWidth to +halfWidth in x, with its ends
-        public void Prism(List<(float z, float y)> profile, float halfWidth)
+        // A prism across the trailer: a convex side profile in (z, y), from x - halfWidth to x + halfWidth, with its ends
+        public void Prism(List<(float z, float y)> profile, float halfWidth, float x = 0f)
         {
             float cz = 0f, cy = 0f;
             foreach (var (z, y) in profile)
@@ -434,9 +463,9 @@ namespace TestTrailer
                 var (z0, y0) = profile[i];
                 var (z1, y1) = profile[(i + 1) % profile.Count];
                 var outward = new N3(0f, (y0 + y1) / 2f - cy, (z0 + z1) / 2f - cz);
-                Quad(new N3(-halfWidth, y0, z0), new N3(-halfWidth, y1, z1), new N3(halfWidth, y0, z0), new N3(halfWidth, y1, z1), outward);
+                Quad(new N3(x - halfWidth, y0, z0), new N3(x - halfWidth, y1, z1), new N3(x + halfWidth, y0, z0), new N3(x + halfWidth, y1, z1), outward);
                 foreach (float side in new[] { -1f, 1f })
-                    Triangle(new N3(side * halfWidth, cy, cz), new N3(side * halfWidth, y0, z0), new N3(side * halfWidth, y1, z1), new N3(side, 0f, 0f));
+                    Triangle(new N3(x + side * halfWidth, cy, cz), new N3(x + side * halfWidth, y0, z0), new N3(x + side * halfWidth, y1, z1), new N3(side, 0f, 0f));
             }
         }
 

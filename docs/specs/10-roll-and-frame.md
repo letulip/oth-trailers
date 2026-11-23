@@ -46,12 +46,20 @@ meets the ball's neck. The trailer's roll against the car (the joint's roll, as 
 past it a spring and damper act on both: 2 Hz on the trailer's roll inertia round its drawbar's line (its own inertia
 round the centre of mass plus the mass times the centre's distance from that line), ζ 0.8, as the yaw and pitch stops.
 The torque goes on the trailer along its forward axis and the opposite on the car, applied each physics step with the
-wheels (OnBeforeSimulate), and never more than twice the trailer's own weight times its half track, so a trailer can
-never throw the car over. Roll stays free inside ±25°: the joint is unchanged. Detaching at 60° off upright stays.
+wheels (OnBeforeSimulate). The spring's torque is never more than twice the trailer's own weight times its half track nor
+half the car's righting moment (its weight times half its track; the Mammoth's 28 kN·m), with the damper at most 1.5 ×
+that, so a trailer can never throw the car over; on its way back in the stop never pulls the trailer outward. Roll stays free inside ±25°: the joint is unchanged. Detaching at 60° off upright stays.
 
-**The frame under the flat only.** On M and L the rails run under the flat bottom between the chamfers (from the front
-0.25 m in to the back 0.25 m in), the cross members at their ends, the drawbar's level run from the front cross member.
-S has no chamfers and keeps full-length rails.
+**The frame as long as the flat bottom.** On M and L the rails run under the flat bottom only, from where the front
+chamfer meets the floor to where the rear one does (0.25 m in from each end), with square ends – a frame with the body
+on it; lamps or shackles may go on those ends later (the owner chose square over ends cut along the chamfers). The cross
+members at their ends, the drawbar's level run from the front cross member. S has no chamfers and keeps full-length
+rails.
+
+**A tandem's axles from its wheels.** L's two axles were 0.9 m apart whatever the wheels, so the Mammoth's (1.04 m
+across) overlapped by 0.14 m. The spacing becomes the car's wheel's diameter + 0.12 m between the tyres, at least 0.9 m:
+1.16 m on the Mammoth, 0.96 on the Protector; the axles' middle stays where 11 % on the ball puts it, and the wheels,
+springs and fenders stay under the body and the rails.
 
 **The collider as the body looks.** 0.0.4's box collider keeps square lower corners, so its ends catch the ground where
 the chamfers are drawn. On M and L the collider becomes a convex mesh of the chamfered profile (the body's shape exactly);

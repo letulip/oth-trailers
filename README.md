@@ -7,7 +7,7 @@ before real trailers are built. Not a mod for players yet and not on Nexus.
 The spec, the game's facts it rests on and the stages, each played before the next: [`docs/test-trailer.md`](docs/test-trailer.md).
 What comes next, in order: [`docs/specs/`](docs/specs/README.md).
 
-## What it does (0.0.4)
+## What it does (0.0.5)
 
 - **N** hitches a trailer behind the car you drive, solo or as the host (not as a client yet), only with the car
   standing, upright and with room behind it. **Shift+N** picks the next size and rebuilds a hitched trailer. **F11**
@@ -43,9 +43,14 @@ the box wears a plain copy of the car body's material; true: Unity's URP Lit).
 
 ## History
 
+- **0.0.5** – [`docs/specs/10-roll-and-frame.md`](docs/specs/10-roll-and-frame.md): each size's weight packed low
+  (the centre of mass at the floor + 0.2 of the box's height, S 0.15; the mass unchanged), springs 1.2 Hz (were 1.7), a
+  soft roll stop at the coupling past ±25° against the car, the frame's rails as long as the flat bottom (square ends), a collider
+  with the body's chamfers, L's tandem spaced by the car's wheel (no overlap on the Mammoth). Not played yet.
 - **0.0.4** – stage 4 ([`docs/specs/04-axle-and-z-drawbar.md`](docs/specs/04-axle-and-z-drawbar.md)): the body on its
   axle on leaf springs (the floor and the centre of mass down by 0.10–0.31 m), a Z drawbar, a bump stop, the wheels drawn
-  straight (no figure eight). Not played yet.
+  straight (no figure eight). Played (`Latest (59).log`): the Z and the wheels good; M on the Mammoth turned over on a
+  side slope at about 38° («сильно валкий»), and the rails stuck out under the chamfers.
 - **0.0.3** – stage 3: the car's own wheels and grip, stick-slip, the trailer drawn from the drawn car, the box no
   longer meeting the ground, roll free at the hitch, a soft yaw stop, L lower and wider, longer rays at hitching.
   Played on 24 November 2026 («очень хорошо, трейлер ведёт себя сильно лучше»): calm on the Protector; on the Mammoth

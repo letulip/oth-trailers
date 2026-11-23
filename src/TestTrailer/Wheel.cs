@@ -13,9 +13,10 @@ namespace TestTrailer
     // rolls freely (no brake), with a little rolling resistance. Stepped once per physics step from Fusion's (Rig.Step).
     internal sealed class Wheel
     {
-        // The spring's natural frequency (1.7 Hz) with its rate scaled to the wheel's load: the static compression is
-        // g / ω², about 8.6 cm, whatever the size
-        public const float Omega = 10.681f, Padding = 0.15f;
+        // The spring's natural frequency (1.2 Hz, spec 10; the Mammoth's own is 1.1) with its rate scaled to the wheel's
+        // load: the static compression is g / ω², about 17 cm, whatever the size. A travel too short for that sag gets
+        // the spring that sags half of it.
+        public const float Omega = 7.54f, Padding = 0.15f;
         private const float DampingK = 1.5f, RollingResistance = 0.015f, MinNormalUp = 0.45f;
         // The stick point's spring: 3 Hz on the wheel's load, critically damped
         private const float StickOmega = 2f * (float)Math.PI * 3f, StickZeta = 1f, Rebase = 1f;
@@ -28,7 +29,7 @@ namespace TestTrailer
 
         public readonly string Name;
         public readonly N3 Mount;               // the hub at full compression, in the trailer's space
-        public readonly float Radius, Width, Travel, Load, StaticCompression;
+        public readonly float Radius, Width, Travel, Load, StaticCompression, SpringOmega;
         private readonly float _shoulder, _shoulderRadius, _spring, _damper, _maxForce, _stick, _stickDamper, _weight;
         // The bump stop's stiffness and damper, from the wheel's effective mass (SetBump, at hitching)
         public float EffectiveMass, BumpStiffness, BumpDamper, BumpOmegaDtActual;
@@ -59,13 +60,14 @@ namespace TestTrailer
             Width = width;
             Travel = travel;
             Load = load;
-            StaticCompression = Math.Min(gravity / (Omega * Omega), travel * 0.5f);
+            SpringOmega = Math.Max(Omega, (float)Math.Sqrt(gravity / (travel * 0.5f)));
+            StaticCompression = gravity / (SpringOmega * SpringOmega);
             Mount = hubAtRest + new N3(0f, Travel - StaticCompression, 0f);
             Extension = Travel - StaticCompression;
             _shoulder = radius * 0.5f;
             _shoulderRadius = (float)Math.Sqrt(radius * radius - _shoulder * _shoulder);
-            _spring = load * Omega * Omega;
-            _damper = DampingK * load * Omega;
+            _spring = load * SpringOmega * SpringOmega;
+            _damper = DampingK * load * SpringOmega;
             _maxForce = MaxTimes * load * gravity;
             _weight = load * gravity;
             _stick = load * StickOmega * StickOmega;

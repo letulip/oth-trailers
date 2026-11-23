@@ -223,6 +223,11 @@ namespace TestTrailer
         public const float MaxSpawnTilt = 20f;
         private const float MaxPitchFix = 25f, MaxRollFix = 20f, SpawnReach = 0.3f;
         private const float PitchLimit = 45f, YawSoftFrom = 85f, LimitHz = 2f, LimitDamping = 0.8f;
+        // The roll stop (spec 10): free to ±25° against the car, then a spring and damper on both bodies, never more
+        // than RollStopTimes × the trailer's weight × its half track nor half the car's righting moment
+        private const float RollFree = 25f, RollStopTimes = 2f;
+        private float _rollSpring, _rollDamper, _rollMaxTorque, _rollTorqueMax;
+        private int _rollStopSteps;
         private const float OverloadTimes = 8f, OverloadSeconds = 0.5f, Jackknife = 110f, MaxTilt = 60f, MaxDrop = 2f, NoGroundSeconds = 2f;
         private const double FirstStepSeconds = 1.5, IgnoreEvery = 2.0;
         private const int DrawSample = 150;
@@ -254,7 +259,7 @@ namespace TestTrailer
         private float _carMass, _gravity;
         private N3 _hitchCar;
         private GameObject _go, _look;
-        private BoxCollider _box;
+        private Collider _box;
         private ConfigurableJoint _joint;
         private Wheel[] _wheels = Array.Empty<Wheel>();
         private readonly List<Object> _assets = new();
@@ -333,6 +338,25 @@ namespace TestTrailer
         public static float Tilt(NQ q) => Degrees(Math.Acos(Math.Clamp(N3.Transform(Up, q).Y, -1f, 1f)));
 
         private static float Degrees(double radians) => (float)(radians * 180.0 / Math.PI);
+
+        // The car's own limit on a side slope, standing, for the log: its centre of mass over the ground under the coupling
+        // (along the car's up) against half its track
+        private string CarTipHow(N3 hitchWorld, Layout l)
+        {
+            try
+            {
+                var carUp = N3.Transform(Up, Q(_carBody.rotation));
+                float height = N3.Dot(N(_carBody.worldCenterOfMass) - hitchWorld, carUp) - l.Ground;
+                float half = _carWheels.Track / 2f;
+                return height > 0.05f && half > 0.05f
+                    ? $"{Degrees(Math.Atan2(half, height)):0.0}°, its centre of mass {height:0.00} m up, half its track {half:0.00} m"
+                    : $"unread (centre of mass {height:0.00} m, half track {half:0.00} m)";
+            }
+            catch (Exception e)
+            {
+                return $"unread ({e.Message})";
+            }
+        }
 
         // --- making it ---------------------------------------------------------------------------------------------
         public static Rig Create(Car car, NetworkRunner runner, Preset preset, out string refusal, out string say)
@@ -551,10 +575,28 @@ namespace TestTrailer
             // to its placed pose on the ground
             _go.transform.rotation = U(carRotation);
 
-            // The body: one box collider for the box only (its bottom the floor, on the frame over the axle), the car's layer
-            _box = _go.AddComponent<BoxCollider>();
-            _box.center = U(l.BodyCentre);
-            _box.size = U(l.BodySize);
+            // The body: one collider for the body only (its bottom the floor, on the frame over the axle), the car's layer:
+            // on M and L a convex mesh of the chamfered body, so its ends do not catch where the chamfers are drawn
+            // (spec 10); on S a box
+            string colliderHow;
+            if (l.Chamfered)
+            {
+                var hull = Look.Hull(l);
+                _assets.Add(hull);
+                var meshCollider = _go.AddComponent<MeshCollider>();
+                meshCollider.convex = true;
+                meshCollider.sharedMesh = hull;
+                _box = meshCollider;
+                colliderHow = $"convex mesh of the chamfered body ({hull.vertexCount} vertices, chamfers {l.ChamferSize:0.00} m)";
+            }
+            else
+            {
+                var box = _go.AddComponent<BoxCollider>();
+                box.center = U(l.BodyCentre);
+                box.size = U(l.BodySize);
+                _box = box;
+                colliderHow = $"box {Measure.F(l.BodySize)} at {Measure.F(l.BodyCentre)}";
+            }
             Body = _go.AddComponent<Rigidbody>();
             Body.mass = Preset.Mass;
             Body.centerOfMass = U(com);
@@ -585,6 +627,14 @@ namespace TestTrailer
             float wn = 2f * (float)Math.PI * LimitHz;
             float pitchSpring = pitchInertia * wn * wn, pitchDamper = 2f * LimitDamping * (float)Math.Sqrt(pitchSpring * pitchInertia);
             float yawSpring = yawInertia * wn * wn, yawDamper = 2f * LimitDamping * (float)Math.Sqrt(yawSpring * yawInertia);
+            // The roll stop's spring from the roll inertia round the drawbar's line (forward through the coupling)
+            float rollInertia = inertia.Z + Preset.Mass * (com.X * com.X + com.Y * com.Y);
+            _rollSpring = rollInertia * wn * wn;
+            _rollDamper = 2f * LimitDamping * (float)Math.Sqrt(_rollSpring * rollInertia);
+            // capped by the trailer's own (twice its weight × its half track) and by half the car's righting moment (its
+            // weight × half its track), so the trailer can never throw the car over
+            float carRighting = _carMass * _gravity * Math.Max(0.3f, _carWheels.Track / 2f);
+            _rollMaxTorque = Math.Min(RollStopTimes * Preset.Mass * _gravity * l.WheelX, 0.5f * carRighting);
             _joint = _go.AddComponent<ConfigurableJoint>();
             _joint.autoConfigureConnectedAnchor = false;
             _joint.anchor = new Vector3(0f, 0f, 0f);
@@ -673,24 +723,27 @@ namespace TestTrailer
             Visuals();
 
             MelonLogger.Msg($"Test Trailer: size {Preset.Name} hitched to '{Car.Name}' ({_carMass:0} kg): {Preset.Mass:0} kg, body {Preset.Length} x {Preset.Width} x {Preset.Height} m " +
-                            $"{(l.Chamfered ? $"(lower edges chamfered {Layout.Chamfer} m, look only)" : "")}; " +
+                            $"{(l.Chamfered ? $"(lower edges chamfered {l.ChamferSize:0.00} m, the collider too; the rails as long as the flat bottom, square ends)" : "")}; " +
                             $"floor {l.FloorY - l.Ground:0.000} m over the ground on its axle{(l.Axles.Length > 1 ? "s" : "")} (axle centre {l.AxleY - l.Ground:0.000} m + springs {Layout.Springs} + frame {Layout.Frame}), " +
                             $"drawbar line {l.LineY - l.Ground:0.000} m, step {l.Step:+0.000;-0.000;0.000} m over {Math.Abs(l.Step):0.000} m (Z, 45°), the hitch {-l.Ground:0.000} m over the ground; " +
                             $"coupling at {Measure.F(_hitchCar)} car space – {hitch.Source}; ground ({ground.How})");
             MelonLogger.Msg($"Test Trailer: wheels from {w.From}: radius {w.Radius:0.000} m, width {w.Width:0.000} m, travel {w.Travel:0.00} m (the car's {_carWheels.Travel:0.00}, at most {WheelSpec.MaxTravel}), " +
-                            $"{_wheels.Length} of them at ±{l.WheelX:0.000} m (the car's track {w.Track:0.000}), axle{(l.Axles.Length > 1 ? "s" : "")} at z {string.Join(", ", Array.ConvertAll(l.Axles, z => z.ToString("0.000")))}; " +
-                            $"spring {Wheel.Omega} rad/s on the load; looks: {looksHow}");
+                            $"{_wheels.Length} of them at ±{l.WheelX:0.000} m (the car's track {w.Track:0.000}), axle{(l.Axles.Length > 1 ? "s" : "")} at z {string.Join(", ", Array.ConvertAll(l.Axles, z => z.ToString("0.000")))}{(l.Axles.Length > 1 ? $" ({l.Spacing:0.00} m apart: the wheel's diameter + {Layout.TandemGap} m, at least {Layout.TandemSpacing})" : "")}; " +
+                            $"springs {_wheels[0].SpringOmega / (2f * Math.PI):0.00} Hz on the load (ω {_wheels[0].SpringOmega:0.00} rad/s, sag {_wheels[0].StaticCompression:0.000} m{(_wheels[0].SpringOmega > Wheel.Omega + 1e-3f ? ", stiffened: the travel is short" : "")}); looks: {looksHow}");
             MelonLogger.Msg($"Test Trailer: wheels: side from the car's wheel ({_carWheels.SideHow}), base rotation identity (left) / 180° about up (right); " +
                             $"{(_wheelNotes.Count > 0 ? string.Join("; ", _wheelNotes) : "no copies")}; scale the source's absolute; spin about the axle each drawn frame from the ground speed; " +
                             $"bump stop at +{Wheel.BumpRise:0.00} m over static ({bumpHow}), fenders {Layout.FenderGap} m over the static wheel top");
             MelonLogger.Msg($"Test Trailer: grip: tyre {tireHow}; surfaces {surfaceHow}; friction used = the tyre's lateral peak (sticking) or limit (sliding) friction × the surface's grip");
-            MelonLogger.Msg($"Test Trailer: mass: CoM {Measure.F(com)} trailer space ({(Preset.Axles > 1 ? "a quarter" : "a third")} of the body's height over the floor), " +
+            MelonLogger.Msg($"Test Trailer: mass: CoM {Measure.F(com)} trailer space, {com.Y - l.FloorY:0.000} m over the floor ({(com.Y - l.FloorY) / Preset.Height:0.00} of the body's height; " +
+                            $"chassis {Layout.ChassisShare:P0}, shell {Layout.ShellShare:P0}, load {Layout.LoadShare:P0} packed {l.LoadHeight:0.00} m high), {com.Y - l.Ground:0.000} m over the ground; " +
+                            $"turns over on a side slope at {Degrees(Math.Atan2(l.WheelX, com.Y - l.Ground)):0.0}° standing (the car: {CarTipHow(hitchWorld, l)}), " +
                             $"static tow-ball load {tonguePercent:0.0} % ({Preset.Mass * tonguePercent / 100f:0} kg), {wheelLoad:0} kg a wheel; inertia {Measure.F(inertia)} (boxes); " +
                             $"interpolation None, ContinuousSpeculative, solver 12/4, maxDepenetrationVelocity 1, maxAngularVelocity 7; " +
-                            $"box collider {Measure.F(l.BodySize)} at {Measure.F(l.BodyCentre)}; {ignoreLine}; {terrainLine}");
+                            $"collider: {colliderHow}; {ignoreLine}; {terrainLine}");
             MelonLogger.Msg($"Test Trailer: hitch: ball joint, axis up (joint X = yaw: free to ±{YawSoftFrom:0}°, then a soft stop, spring {yawSpring:0} damper {yawDamper:0} from {yawInertia:0} kg·m²; " +
                             $"detached past {Jackknife:0}°), secondary axis right (joint Y = pitch ±{PitchLimit:0}° soft, spring {pitchSpring:0} damper {pitchDamper:0} from {pitchInertia:0} kg·m²; " +
-                            $"{LimitHz} Hz, ζ {LimitDamping}), Z = roll free; projection position+rotation 0.05 m / 5°; connectedMassScale 1{jointNotes}; " +
+                            $"{LimitHz} Hz, ζ {LimitDamping}), Z = roll free in the joint; roll stop: free to ±{RollFree:0}° against the car, then {_rollSpring:0} N·m/rad, " +
+                            $"{_rollDamper:0} N·m·s/rad from {rollInertia:0} kg·m² round the drawbar's line, the spring at most {_rollMaxTorque:0} N·m, with the damper {1.5f * _rollMaxTorque:0} (the car's righting moment {carRighting:0}), on the trailer and back on the car; projection position+rotation 0.05 m / 5°; connectedMassScale 1{jointNotes}; " +
                             $"the joint's zero at the car's pose, the trailer then placed pitched {pitch:0.0}° and rolled {roll:0.0}° to the car");
             MelonLogger.Msg($"Test Trailer: wheels at hitching{lines}");
             MelonLogger.Msg($"Test Trailer: steps with Fusion: {_addOn.GetIl2CppType().Name}.OnBeforeSimulate ({addOnWhere}), dt {dtHow}; the poses for drawing {_afterHow}; " +
@@ -735,14 +788,17 @@ namespace TestTrailer
         private static NQ Rotation(NQ car, float pitch, float roll) =>
             car * NQ.CreateFromAxisAngle(Right, pitch * (float)Math.PI / 180f) * NQ.CreateFromAxisAngle(Forward, roll * (float)Math.PI / 180f);
 
-        // The boxes' inertia round the centre of mass (Trailer Lab's BoxInertia): the body (85 % of the mass) and the
-        // chassis with its axles and wheels (15 %)
+        // The boxes' inertia round the centre of mass (Trailer Lab's BoxInertia), as the mass is split (spec 10): the
+        // chassis with its axles and wheels (20 %) at the rails' middle, the shell (15 %) as the body's box, the load
+        // (65 %) packed on the floor
         private N3 Inertia(N3 com)
         {
             var l = Layout;
             var chassis = new N3(2f * l.WheelX + l.Wheels.Width, 0.4f, Preset.Length);
-            return BoxInertia(0.85f * Preset.Mass, l.BodySize, l.BodyCentre - com)
-                   + BoxInertia(0.15f * Preset.Mass, chassis, new N3(0f, l.HubY, l.BodyCentre.Z) - com);
+            var load = new N3(Preset.Width, l.LoadHeight, Preset.Length);
+            return BoxInertia(Layout.ChassisShare * Preset.Mass, chassis, new N3(0f, l.LineY, l.BodyCentre.Z) - com)
+                   + BoxInertia(Layout.ShellShare * Preset.Mass, l.BodySize, l.BodyCentre - com)
+                   + BoxInertia(Layout.LoadShare * Preset.Mass, load, new N3(0f, l.FloorY + l.LoadHeight / 2f, l.BodyCentre.Z) - com);
         }
 
         private static N3 BoxInertia(float mass, N3 size, N3 offset)
@@ -1444,6 +1500,7 @@ namespace TestTrailer
                 if (!_afterSubscribed)
                     Record(position, rotation, carPos, carRot);
                 JointAngles(carRot, rotation);
+                RollStop(carRot, rotation);
                 var up = N3.Transform(Up, rotation);
                 var forward = N3.Transform(Forward, rotation);
                 bool any = false;
@@ -1494,6 +1551,36 @@ namespace TestTrailer
             _jointRoll = Degrees(Math.Atan2(right.Y, up.Y));
             _jointPitchMax = Math.Max(_jointPitchMax, Math.Abs(_jointPitch));
             _jointRollMax = Math.Max(_jointRollMax, Math.Abs(_jointRoll));
+        }
+
+        // The roll stop: θ the trailer's turn round its forward axis that would bring its up onto the car's (the car's up
+        // seen across that axis); past ±25° a torque along that axis turns the trailer back toward the car and the same
+        // the other way turns the car toward the trailer, damped on their relative roll rate, capped
+        private void RollStop(NQ carRot, NQ rotation)
+        {
+            var forward = N3.Transform(Forward, rotation);
+            var up = N3.Transform(Up, rotation);
+            var carUp = N3.Transform(Up, carRot);
+            carUp -= forward * N3.Dot(carUp, forward);
+            if (carUp.LengthSquared() < 1e-6f)
+                return;
+            carUp = N3.Normalize(carUp);
+            float theta = (float)Math.Atan2(N3.Dot(N3.Cross(up, carUp), forward), N3.Dot(up, carUp));
+            float free = RollFree * (float)Math.PI / 180f;
+            float excess = Math.Abs(theta) - free;
+            if (excess <= 0f)
+                return;
+            float rate = N3.Dot(N(Body.angularVelocity) - N(_carBody.angularVelocity), forward);
+            // the spring capped on its own, so the damper still works when it is; the total at most 1.5 × the cap, and
+            // never pulling the trailer outward on its way back in
+            float spring = Math.Clamp(_rollSpring * Math.Sign(theta) * excess, -_rollMaxTorque, _rollMaxTorque);
+            float torque = Math.Clamp(spring - _rollDamper * rate, -1.5f * _rollMaxTorque, 1.5f * _rollMaxTorque);
+            if (Math.Sign(torque) != Math.Sign(theta))
+                torque = 0f;
+            Body.AddTorque(U(forward * torque));
+            _carBody.AddTorque(U(forward * -torque));
+            _rollTorqueMax = Math.Max(_rollTorqueMax, Math.Abs(torque));
+            _rollStopSteps++;
         }
 
         private const float TeleportDistance = 2f, TeleportAngle = 30f;
@@ -1633,9 +1720,12 @@ namespace TestTrailer
                             $"hitch {(read ? $"{kn:0.00} kN (vertical {verticalKg:0} kg), spread {spread:0.00} kN, largest step-to-step {jump:0.00} kN" : "unread")}" +
                             $"; joint yaw {_jointYaw:+0.0;-0.0;0.0}° pitch {_jointPitch:+0.0;-0.0;0.0}° roll {_jointRoll:+0.0;-0.0;0.0}° to the car " +
                             $"(this second's largest pitch {_jointPitchMax:0.0}°, roll {_jointRollMax:0.0}°; pitch limit ±{PitchLimit:0}°)" +
+                            $"{(_rollStopSteps > 0 ? $"; roll stop {_rollTorqueMax:0} N·m at most, {_rollStopSteps} steps" : "")}" +
                             $"{wheels}; {steps} steps, {stepMs:0.000} ms a step (at most {maxMs:0.000})");
             _jointPitchMax = 0f;
             _jointRollMax = 0f;
+            _rollTorqueMax = 0f;
+            _rollStopSteps = 0;
             _max.CarSpeed = Math.Max(_max.CarSpeed, carSpeed);
             _max.TrailerSpeed = Math.Max(_max.TrailerSpeed, trailerSpeed);
             _max.Yaw = Math.Max(_max.Yaw, Math.Abs(yaw));

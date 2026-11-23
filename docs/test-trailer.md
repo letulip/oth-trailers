@@ -456,3 +456,35 @@ when it had to); a refusal «… not hitched: the hitch is x m over the drawbar'
 **The run** (the spec's): on the Protector and the Mammoth, each size – the wheels from the side at 20–40 km/h (no
 wobble), the Z (the step at the car's end, level elsewhere), bumps (no wheel through a fender or the frame); the L on
 the Mammoth across the kind of slope that turned it over in 0.0.3; a tight turn and a crest. Send `Latest.log`.
+
+## 11. Roll and frame (0.0.5)
+
+Built by [`specs/10-roll-and-frame.md`](specs/10-roll-and-frame.md), after 0.0.4 was played (`Latest (59).log`): M on
+the Mammoth turned over on a side slope at about 38°, where the car itself tips at 47° (its centre of mass 0.83 m up,
+wheels at ±0.90 m; the game's cars have no anti-roll bar and no righting help, they stand by their shape).
+
+- **The weight low, the mass as it is.** Chassis 20 % at the rails' middle, shell 15 % at the box's centre, load 65 %
+  packed on the floor as high as puts the whole at the floor + 0.2 of the box's height (S 0.15). The inertia is the
+  three boxes' round that centre. On the Mammoth: S 44.7°, M 45.1°, L 44.6° standing on a side slope (0.0.4: 40, 40, 42).
+- **Springs 1.2 Hz** on each wheel's load (ω 7.54 rad/s, sag 0.173 m; ζ 0.75 as before); a travel under 0.346 m gets
+  the spring that sags half of it.
+- **A roll stop at the coupling.** The joint's roll stays free; each physics step, past ±25° between the trailer's up
+  and the car's (round the trailer's forward axis), a torque along that axis – 2 Hz on the roll inertia round the
+  drawbar's line, ζ 0.8 on the relative roll rate – turns the trailer back and the car the other way, the spring's part
+  capped by twice the trailer's weight × its half track and by half the car's righting moment, the whole at 1.5 × that,
+  and nothing on the way back in that would pull the trailer outward.
+- **L's tandem** spaced by the car's wheel: its diameter + 0.12 m, at least 0.9 m (the Mammoth 1.16, the Protector
+  0.96; at 0.9 the Mammoth's wheels overlapped by 0.14 m). The wheels' log line gives the spacing.
+- **The frame** as long as the flat bottom (M, L: 0.25 m in from each end), square ends (for lamps or shackles later),
+  the drawbar's level run from the front cross member; **the collider** a convex mesh of the chamfered body (M, L), a box on S.
+
+**Log lines** at hitching: «… (lower edges chamfered 0.25 m, the collider too; the rails as long as the flat bottom, square ends)»;
+«… springs 1.20 Hz on the load (ω 7.54 rad/s, sag 0.173 m) …»; «mass: CoM … m over the floor (… of the body's height;
+chassis 20 %, shell 15 %, load 65 % packed x m high), h m over the ground; turns over on a side slope at a° standing (the
+car: b°, …) …; collider: convex mesh of the chamfered body …»; «hitch: … roll stop: free to ±25° against the car, then
+k N·m/rad, c N·m·s/rad from I kg·m² round the drawbar's line, the spring at most t N·m, with the damper 1.5 t (the
+car's righting moment r) …». In the
+telemetry, a second the stop acted: «roll stop x N·m at most, n steps».
+
+**The run** (the spec's): M and L on the Mammoth along the slope that turned 0.0.4's M over and across ruts; one wheel
+into a hole and over a rock at walking pace; crests and the end of a ramp. Send `Latest.log`.
