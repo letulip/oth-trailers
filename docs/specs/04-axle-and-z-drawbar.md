@@ -25,7 +25,8 @@ from that X axis, it wobbles in a figure eight.
 
 **Wheels.** Which side a wheel is on comes from the car's own wheel (VPP's left/right flag on the wheel, `m_isLeftWheel`,
 or the collider's x in car space), not from the copy's axes: a wheel mirrored by a negative scale would read wrong. The
-copy's base rotation is the identity for a right wheel and 180° about Y for a left one, its scale the absolute of the
+copy's base rotation is the identity for a left wheel and 180° about Y for a right one (the game's wheel meshes are made
+for the left side: in all 22 car prefabs the right wheel's LODGroup node is turned 180° about Y), its scale the absolute of the
 source's; the rotation of the node `WheelTransformUpdater.wheelTransform` names and of every node between it and the copied
 LODGroup is reset, so no camber, toe or frozen spin survives. The spin is about the axle (X) through the hub, its angle
 advanced every drawn frame from the trailer's ground speed at that wheel (smooth at any frame rate, and not multiplied by

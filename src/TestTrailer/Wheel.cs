@@ -20,16 +20,25 @@ namespace TestTrailer
         // The stick point's spring: 3 Hz on the wheel's load, critically damped
         private const float StickOmega = 2f * (float)Math.PI * 3f, StickZeta = 1f, Rebase = 1f;
         private const float SurfaceEvery = 0.25f;
+        // The bump stop: a linear ramp from 0.04 to 0.10 m above the static height, its stiffness set from the wheel's
+        // effective mass so ω·dt stays under 1 in the 50 Hz step, a compression-only damper at ζ 0.7, the compression
+        // predicted one step ahead (a fast wheel does not skip the ramp), its impulse in a step limited to what stops the
+        // wheel's mass plus its weight; spring, damper and bump together never past 8 × the wheel's weight
+        public const float BumpRise = 0.10f, BumpFrom = 0.04f, StartRoom = 0.03f, BumpOmegaDt = 0.9f, BumpZeta = 0.7f, MaxTimes = 8f;
 
         public readonly string Name;
         public readonly N3 Mount;               // the hub at full compression, in the trailer's space
         public readonly float Radius, Width, Travel, Load, StaticCompression;
-        private readonly float _shoulder, _shoulderRadius, _spring, _damper, _maxForce, _stick, _stickDamper;
+        private readonly float _shoulder, _shoulderRadius, _spring, _damper, _maxForce, _stick, _stickDamper, _weight;
+        // The bump stop's stiffness and damper, from the wheel's effective mass (SetBump, at hitching)
+        public float EffectiveMass, BumpStiffness, BumpDamper, BumpOmegaDtActual;
 
         public Transform Visual;
-        public bool Grounded, Sliding;
+        public bool Grounded, Sliding, AtBumpStop;
         public int GroundId;                    // the ground collider's instance id
-        public float Extension, HitDistance, Force, LateralSlip, Offset, Spin;
+        public float Extension, HitDistance, Force, LateralSlip, Offset;
+        // The drawn wheel's turn, advanced every drawn frame from the trailer's ground speed at the wheel (Rig.Visuals)
+        public float Spin, SpinSpeed, AirTime;
         public N3 Contact;
         private N3 _normal, _anchor;
         private bool _anchored;
@@ -57,13 +66,40 @@ namespace TestTrailer
             _shoulderRadius = (float)Math.Sqrt(radius * radius - _shoulder * _shoulder);
             _spring = load * Omega * Omega;
             _damper = DampingK * load * Omega;
-            _maxForce = 4f * load * gravity;
+            _maxForce = MaxTimes * load * gravity;
+            _weight = load * gravity;
             _stick = load * StickOmega * StickOmega;
             _stickDamper = 2f * StickZeta * load * StickOmega;
         }
 
         public float Compression => Travel - Extension;
-        public N3 Hub => Mount - new N3(0f, Extension, 0f);
+        // Above its static height, the wheel as drawn never goes past the bump stop
+        public N3 Hub => Mount - new N3(0f, Math.Max(Extension, Travel - StaticCompression - BumpRise), 0f);
+
+        // The bump stop from the wheel's effective mass (the smallest vertical mass the trailer offers at this wheel, the
+        // body free) and the physics step: k = (0.9 / dt)² × m, so ω·dt = 0.9 with the spring counted
+        public void SetBump(float effectiveMass, float dt)
+        {
+            EffectiveMass = effectiveMass;
+            float k = BumpOmegaDt * BumpOmegaDt * effectiveMass / (dt * dt) - _spring;
+            BumpStiffness = Math.Max(k, _spring);
+            BumpDamper = 2f * BumpZeta * (float)Math.Sqrt(BumpStiffness * effectiveMass);
+            BumpOmegaDtActual = (float)Math.Sqrt((BumpStiffness + _spring) / effectiveMass) * dt;
+        }
+
+        // The bump stop's force: from the compression predicted one step ahead (now + dt × the closing speed), linear
+        // from 0.04 m above static, damped while closing only, and no more in a step than stops the wheel's mass and
+        // carries its weight
+        private float BumpStop(float compression, float closing, float dt)
+        {
+            float predicted = compression + dt * Math.Max(0f, closing) - StaticCompression;
+            AtBumpStop = predicted > BumpFrom;
+            if (!AtBumpStop || BumpStiffness <= 0f)
+                return 0f;
+            float force = BumpStiffness * (predicted - BumpFrom) + BumpDamper * Math.Max(0f, closing);
+            float limit = EffectiveMass * Math.Max(0f, closing) / Math.Max(dt, 1e-3f) + _weight;
+            return Math.Min(force, limit);
+        }
 
         // The ground under the wheel now, from its mount in the world: the shortest acceptable hit of the three rays.
         // `reach` lets the rays look further than the travel (at hitching, on a slope); the wheel then hangs at full travel.
@@ -122,6 +158,7 @@ namespace TestTrailer
             var mount = position + N3.Transform(Mount, rotation);
             if (!Find(rig, mount, up, forward))
             {
+                AtBumpStop = false;
                 if (++_missed >= KeepAnchor)
                 {
                     _anchored = false;
@@ -138,7 +175,10 @@ namespace TestTrailer
             var v = rig.Body.GetPointVelocity(Rig.U(hub));
             var velocity = new N3(v.x, v.y, v.z);
             var normal = _normal;
-            float normalForce = Math.Clamp(_spring * Compression - _damper * N3.Dot(velocity, normal), 0f, _maxForce);
+            // closing: the hub moving into the ground along its normal (the suspension compressing)
+            float closing = -N3.Dot(velocity, normal);
+            float bump = BumpStop(Compression, closing, dt);
+            float normalForce = Math.Clamp(_spring * Compression + _damper * closing + bump, 0f, _maxForce);
             var tangent = forward - normal * N3.Dot(forward, normal);
             if (tangent.LengthSquared() < 1e-6f)
                 return;
@@ -184,7 +224,6 @@ namespace TestTrailer
             var force = normal * normalForce + lateral * sideways + tangent * rolling;
             rig.Body.AddForceAtPosition(Rig.U(force), Rig.U(Contact), ForceMode.Force);
             Force = force.Y;
-            Spin = (Spin + forwardSpeed / Radius * (180f / (float)Math.PI) * dt) % 360f;
         }
     }
 }

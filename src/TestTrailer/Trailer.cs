@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
+using Il2Cpp;
 using Il2CppFusion;
 using Il2CppFusion.Addons.Physics;
 using Il2CppInterop.Runtime;
@@ -393,6 +394,15 @@ namespace TestTrailer
             foreach (var collider in _carRoot.GetComponentsInChildren<Collider>(true))
                 if (collider != null)
                     _carColliders.Add(collider.Pointer);
+            // The Z drawbar's step from its line to the hitch: at most 0.6 m either way
+            if (!Layout.StepFits)
+            {
+                float over = Math.Abs(Layout.Step) - Layout.MaxStep;
+                string way = Layout.Step > 0f ? "high" : "low";
+                refusal = $"the hitch is {Math.Abs(Layout.Step):0.00} m {(Layout.Step > 0f ? "over" : "under")} the drawbar's line, {over:0.00} m more than the Z's {Layout.MaxStep} m";
+                say = $"The hitch is {over:0.00} m too {way} for this trailer";
+                return false;
+            }
             string tireHow = Tire();
             string surfaceHow = Surfaces();
 
@@ -459,28 +469,70 @@ namespace TestTrailer
             var placed = Rotation(carRotation, pitch, roll);
 
             // Each wheel's own rays from where it will stand, reaching 0.3 m further than its travel (a slope): every one
-            // must find ground; its surface and grip read there
-            var placedUp = N3.Transform(Up, placed);
-            var placedForward = N3.Transform(Forward, placed);
-            var lines = new StringBuilder();
-            foreach (var wheel in _wheels)
+            // must find ground. No wheel may start inside its bump stop's ramp: if one would (uneven ground under a
+            // tandem), the trailer is pitched up round the coupling until the highest wheel is at most 0.03 m over its
+            // static height (the others hang lower), or it is not made.
+            float lift = 0f;
+            Wheel highest = null;
+            float highestRise = 0f;
+            for (int attempt = 0; ; attempt++)
             {
-                var mount = hitchWorld + N3.Transform(wheel.Mount, placed);
-                bool found = wheel.Find(this, mount, placedUp, placedForward, SpawnReach);
-                if (found)
-                    wheel.Refresh(this);
-                lines.Append($"; {wheel.Name}: ").Append(found
-                    ? $"ground '{GroundName(wheel.GroundId)}', hit at {wheel.HitDistance:0.000} m, compression {wheel.Compression * 100f:0.0} cm (static {wheel.StaticCompression * 100f:0.0}), " +
-                      $"surface {wheel.Surface} grip {wheel.Grip:0.00}, friction {wheel.PeakMu:0.00} sticking / {wheel.SlideMu:0.00} sliding"
-                    : "no ground");
-                if (!found)
+                var up = N3.Transform(Up, placed);
+                var forward = N3.Transform(Forward, placed);
+                highest = null;
+                highestRise = float.MinValue;
+                foreach (var wheel in _wheels)
                 {
-                    Dump(wheel, mount + placedUp * Wheel.Padding, -placedUp, 4f);
-                    refusal = $"the {wheel.Name} wheel's rays found no ground where the trailer would stand (looking {SpawnReach} m past its travel){lines}";
-                    say = "No ground under the trailer's wheels";
+                    var mount = hitchWorld + N3.Transform(wheel.Mount, placed);
+                    if (!wheel.Find(this, mount, up, forward, SpawnReach))
+                    {
+                        Dump(wheel, mount + up * Wheel.Padding, -up, 4f);
+                        refusal = $"the {wheel.Name} wheel's rays found no ground where the trailer would stand (looking {SpawnReach} m past its travel)";
+                        say = "No ground under the trailer's wheels";
+                        return false;
+                    }
+                    float rise = wheel.Compression - wheel.StaticCompression;
+                    if (rise > highestRise)
+                    {
+                        highestRise = rise;
+                        highest = wheel;
+                    }
+                }
+                if (highestRise <= Wheel.StartRoom)
+                    break;
+                if (attempt >= 3)
+                {
+                    refusal = $"the ground behind the car is too uneven: the {highest.Name} wheel would start {highestRise * 100f:0.0} cm over its static height, inside its bump stop (from {Wheel.BumpFrom * 100f:0} cm)";
+                    say = "The ground behind the car is too uneven";
                     return false;
                 }
+                float step = Degrees(Math.Asin(Math.Clamp(highestRise / Math.Max(0.5f, -highest.Mount.Z), -1f, 1f)));
+                pitch += step;
+                lift += step;
+                placed = Rotation(carRotation, pitch, roll);
             }
+            if (Math.Abs(pitch) > MaxPitchFix)
+            {
+                refusal = $"the ground behind the car is too uneven: the trailer would stand pitched {pitch:0}° to the car";
+                say = "The ground behind the car is too uneven";
+                return false;
+            }
+            var lines = new StringBuilder();
+            foreach (float z in l.Axles)
+            {
+                lines.Append($"; axle at z {z:0.000}:");
+                foreach (var wheel in _wheels)
+                {
+                    if (Math.Abs(wheel.Mount.Z - z) > 1e-3f)
+                        continue;
+                    wheel.Refresh(this);
+                    lines.Append($" {(wheel.Mount.X < 0f ? "left" : "right")} '{GroundName(wheel.GroundId)}' hit {wheel.HitDistance:0.000} m, " +
+                                 $"compression {wheel.Compression * 100f:0.0} cm (static {wheel.StaticCompression * 100f:0.0}), {wheel.Surface} grip {wheel.Grip:0.00}, " +
+                                 $"friction {wheel.PeakMu:0.00}/{wheel.SlideMu:0.00}{(wheel.Mount.X < 0f ? ";" : "")}");
+                }
+            }
+            if (lift != 0f)
+                lines.Append($"; pitched up {lift:0.0}° more so no wheel starts in its bump stop");
 
             // Room: nothing in the body's volume from a little over the ground to its top, wheels included
             if (!Room(placed, hitchWorld, out string blocker))
@@ -499,7 +551,7 @@ namespace TestTrailer
             // to its placed pose on the ground
             _go.transform.rotation = U(carRotation);
 
-            // The body: one box collider for the box only (its bottom the floor, at the hitch's height), the car's layer
+            // The body: one box collider for the box only (its bottom the floor, on the frame over the axle), the car's layer
             _box = _go.AddComponent<BoxCollider>();
             _box.center = U(l.BodyCentre);
             _box.size = U(l.BodySize);
@@ -508,6 +560,7 @@ namespace TestTrailer
             Body.centerOfMass = U(com);
             Body.inertiaTensorRotation = new Quaternion(0f, 0f, 0f, 1f);
             var inertia = Inertia(com);
+            string bumpHow = Bumps(com, inertia);
             Body.inertiaTensor = U(inertia);
             // As the car: in Script mode Unity's interpolation is likely ignored (the drawn trailer is Visuals' job)
             Body.interpolation = RigidbodyInterpolation.None;
@@ -620,11 +673,16 @@ namespace TestTrailer
             Visuals();
 
             MelonLogger.Msg($"Test Trailer: size {Preset.Name} hitched to '{Car.Name}' ({_carMass:0} kg): {Preset.Mass:0} kg, body {Preset.Length} x {Preset.Width} x {Preset.Height} m " +
-                            $"{(l.Chamfered ? $"(lower edges chamfered {Layout.Chamfer} m, look only)" : "")}, its floor and the drawbar level at the coupling, {l.FloorY - l.Ground:0.000} m over the ground; " +
+                            $"{(l.Chamfered ? $"(lower edges chamfered {Layout.Chamfer} m, look only)" : "")}; " +
+                            $"floor {l.FloorY - l.Ground:0.000} m over the ground on its axle{(l.Axles.Length > 1 ? "s" : "")} (axle centre {l.AxleY - l.Ground:0.000} m + springs {Layout.Springs} + frame {Layout.Frame}), " +
+                            $"drawbar line {l.LineY - l.Ground:0.000} m, step {l.Step:+0.000;-0.000;0.000} m over {Math.Abs(l.Step):0.000} m (Z, 45°), the hitch {-l.Ground:0.000} m over the ground; " +
                             $"coupling at {Measure.F(_hitchCar)} car space – {hitch.Source}; ground ({ground.How})");
             MelonLogger.Msg($"Test Trailer: wheels from {w.From}: radius {w.Radius:0.000} m, width {w.Width:0.000} m, travel {w.Travel:0.00} m (the car's {_carWheels.Travel:0.00}, at most {WheelSpec.MaxTravel}), " +
                             $"{_wheels.Length} of them at ±{l.WheelX:0.000} m (the car's track {w.Track:0.000}), axle{(l.Axles.Length > 1 ? "s" : "")} at z {string.Join(", ", Array.ConvertAll(l.Axles, z => z.ToString("0.000")))}; " +
                             $"spring {Wheel.Omega} rad/s on the load; looks: {looksHow}");
+            MelonLogger.Msg($"Test Trailer: wheels: side from the car's wheel ({_carWheels.SideHow}), base rotation identity (left) / 180° about up (right); " +
+                            $"{(_wheelNotes.Count > 0 ? string.Join("; ", _wheelNotes) : "no copies")}; scale the source's absolute; spin about the axle each drawn frame from the ground speed; " +
+                            $"bump stop at +{Wheel.BumpRise:0.00} m over static ({bumpHow}), fenders {Layout.FenderGap} m over the static wheel top");
             MelonLogger.Msg($"Test Trailer: grip: tyre {tireHow}; surfaces {surfaceHow}; friction used = the tyre's lateral peak (sticking) or limit (sliding) friction × the surface's grip");
             MelonLogger.Msg($"Test Trailer: mass: CoM {Measure.F(com)} trailer space ({(Preset.Axles > 1 ? "a quarter" : "a third")} of the body's height over the floor), " +
                             $"static tow-ball load {tonguePercent:0.0} % ({Preset.Mass * tonguePercent / 100f:0} kg), {wheelLoad:0} kg a wheel; inertia {Measure.F(inertia)} (boxes); " +
@@ -638,6 +696,40 @@ namespace TestTrailer
             MelonLogger.Msg($"Test Trailer: steps with Fusion: {_addOn.GetIl2CppType().Name}.OnBeforeSimulate ({addOnWhere}), dt {dtHow}; the poses for drawing {_afterHow}; " +
                             $"ground layers 0x{GroundMask:X}");
             return true;
+        }
+
+        // Each wheel's bump stop from its effective vertical mass – the body free: 1 / (1/M + z²/Ix + x²/Iz) for the wheel's
+        // place round the centre of mass – and the physics step's dt
+        private string Bumps(N3 com, N3 inertia)
+        {
+            float dt = 0.02f;
+            try
+            {
+                float read = _runner.DeltaTime;
+                if (read > 0f && read < 1f)
+                    dt = read;
+            }
+            catch (Exception)
+            {
+                // 50 Hz, the game's
+            }
+            float least = float.MaxValue;
+            Wheel weakest = null;
+            foreach (var wheel in _wheels)
+            {
+                var r = wheel.Mount - com;
+                float mass = 1f / (1f / Preset.Mass + r.Z * r.Z / Math.Max(1f, inertia.X) + r.X * r.X / Math.Max(1f, inertia.Z));
+                wheel.SetBump(mass, dt);
+                if (mass < least)
+                {
+                    least = mass;
+                    weakest = wheel;
+                }
+            }
+            return weakest == null ? "no wheels"
+                : $"a linear ramp from +{Wheel.BumpFrom:0.00} m, stiffness {weakest.BumpStiffness:0} N/m and damper {weakest.BumpDamper:0} N·s/m (ζ {Wheel.BumpZeta}) " +
+                  $"from the smallest effective wheel mass {least:0} kg ({weakest.Name}), ω·dt {weakest.BumpOmegaDtActual:0.00} at dt {dt:0.000} s; " +
+                  $"all of a wheel's force at most {Wheel.MaxTimes} × its weight";
         }
 
         private static NQ Rotation(NQ car, float pitch, float roll) =>
@@ -845,6 +937,11 @@ namespace TestTrailer
         // --- looks ----------------------------------------------------------------------------------------------------
         // The body and drawbar mesh, and the car's own wheels as it wears them now (its rear left and right drawn wheels
         // copied, colliders taken off), on an object of their own
+        private readonly List<Transform> _axleLooks = new();
+        private readonly List<(int axle, float side, float end, Transform look)> _leaves = new();
+        // What the copies dropped of their sources, for the log
+        private readonly List<string> _wheelNotes = new();
+
         private string Looks()
         {
             _look = new GameObject("TestTrailerLook");
@@ -865,8 +962,9 @@ namespace TestTrailer
                 holder.layer = _look.layer;
                 holder.transform.SetParent(_look.transform, false);
                 wheel.Visual = holder.transform;
-                var source = wheel.Mount.X < 0f ? _carWheels.LeftLook : _carWheels.RightLook;
-                if (CopyWheel(source, holder.transform))
+                bool left = wheel.Mount.X < 0f;
+                var source = left ? _carWheels.LeftLook : _carWheels.RightLook;
+                if (CopyWheel(source, left ? _carWheels.LeftUpdater : _carWheels.RightUpdater, left, holder.transform))
                 {
                     copied++;
                     continue;
@@ -878,6 +976,19 @@ namespace TestTrailer
                 }
                 Part("Tyre", fallback, material, holder.transform);
             }
+            // The axles with their leaf springs, drawn with the wheels: they follow the compression
+            var axleMesh = Look.ToMesh(Look.Axle(Layout), "TestTrailerAxle");
+            _assets.Add(axleMesh);
+            _axleLooks.Clear();
+            for (int i = 0; i < Layout.Axles.Length; i++)
+                _axleLooks.Add(Part($"Axle {i + 1}", axleMesh, material, _look.transform).transform);
+            var unit = Look.ToMesh(Look.Unit(), "TestTrailerLeaf");
+            _assets.Add(unit);
+            _leaves.Clear();
+            for (int i = 0; i < Layout.Axles.Length; i++)
+                foreach (float side in new[] { -1f, 1f })
+                    foreach (float end in new[] { -1f, 1f })
+                        _leaves.Add((i, side, end, Part($"Leaf {i + 1} {(side < 0f ? "left" : "right")} {(end < 0f ? "back" : "front")}", unit, material, _look.transform).transform));
             return $"{copied} of {_wheels.Length} wheels the car's own drawn wheels ({_stripped} other components taken off the copies, {_blocks.Count} renderers' property blocks copied)" +
                    $"{(copied < _wheels.Length ? $", {_wheels.Length - copied} plain" : "")}; material {materialHow}";
         }
@@ -890,7 +1001,13 @@ namespace TestTrailer
         private MaterialPropertyBlock _block;
         private int _stripped;
 
-        private bool CopyWheel(Transform source, Transform holder)
+        // The copy's base turn: a left wheel's drawn node as on the car (identity), a right one's turned 180° about up,
+        // as every car's prefab has its right LODGroup node; nothing of the live wheel's camber, toe or spin
+        private const float SpinInAir = 0.5f;
+
+        private static readonly NQ RightTurn = NQ.CreateFromAxisAngle(new N3(0f, 1f, 0f), (float)Math.PI);
+
+        private bool CopyWheel(Transform source, WheelTransformUpdater updater, bool left, Transform holder)
         {
             if (source == null)
                 return false;
@@ -911,9 +1028,13 @@ namespace TestTrailer
                 copy.name = source.gameObject.name;
                 var t = copy.transform;
                 t.localPosition = new Vector3(0f, 0f, 0f);
-                // its turn and size as on the car (the car's rotation and any scale a mod gave its wheel node)
-                t.localRotation = U(NQ.Conjugate(Q(_carRoot.rotation)) * Q(source.rotation));
-                t.localScale = source.lossyScale;
+                // Its turn: the side's base, nothing of the live wheel's (the axle stays along x, so the spin about x
+                // does not wobble); its size the absolute of the source's (a mirroring negative scale dropped)
+                var baseTurn = left ? NQ.Identity : RightTurn;
+                t.localRotation = U(baseTurn);
+                var scale = source.lossyScale;
+                t.localScale = new Vector3(Math.Abs(scale.x), Math.Abs(scale.y), Math.Abs(scale.z));
+                _wheelNotes.Add(Dropped(source, updater, copy.transform, baseTurn, left));
                 foreach (var component in copy.GetComponentsInChildren<Component>(true))
                 {
                     if (component == null || Kept.Contains(component.GetIl2CppType().Name))
@@ -944,6 +1065,47 @@ namespace TestTrailer
                 MelonLogger.Warning($"Test Trailer: the car's wheel '{source.name}' not copied: {e.Message}");
                 return false;
             }
+        }
+
+        // What the live source carried that the copy drops: its camber and toe (its axle's tilt from the car's x, the
+        // side's base taken off), and the turn of the node the game's WheelTransformUpdater moves (wheelTransform) and
+        // of every node between it and the copied LODGroup, reset to none in the copy where they are part of it
+        private string Dropped(Transform source, WheelTransformUpdater updater, Transform copy, NQ baseTurn, bool left)
+        {
+            var relative = NQ.Conjugate(Q(_carRoot.rotation)) * Q(source.rotation) * NQ.Conjugate(baseTurn);
+            var axle = N3.Transform(new N3(1f, 0f, 0f), relative);
+            float camber = Degrees(Math.Asin(Math.Clamp(axle.Y, -1f, 1f)));
+            float toe = Degrees(Math.Atan2(axle.Z, axle.X));
+            string reset = "no wheelTransform";
+            try
+            {
+                var moved = updater != null ? updater.wheelTransform : null;
+                if (moved != null)
+                {
+                    if (moved.Pointer == source.Pointer || moved.IsChildOf(source))
+                    {
+                        // inside the copy: the same path there, each node from it up to (not including) the copy's root
+                        var path = new List<string>();
+                        for (var n = moved; n != null && n.Pointer != source.Pointer; n = n.parent)
+                            path.Insert(0, n.name);
+                        var node = path.Count > 0 ? copy.Find(string.Join("/", path)) : null;
+                        int count = 0;
+                        for (; node != null && node.Pointer != copy.Pointer; node = node.parent)
+                        {
+                            node.localRotation = new Quaternion(0f, 0f, 0f, 1f);
+                            count++;
+                        }
+                        reset = $"wheelTransform '{moved.name}' inside the copy, {count} node{(count == 1 ? "" : "s")} reset";
+                    }
+                    else
+                        reset = $"wheelTransform '{moved.name}' above the copied node (not copied)";
+                }
+            }
+            catch (Exception e)
+            {
+                reset = $"wheelTransform unread ({e.Message})";
+            }
+            return $"{(left ? "left" : "right")} from '{source.parent?.name}': camber {camber:+0.0;-0.0;0.0}° and toe {toe:+0.0;-0.0;0.0}° of the source dropped, {reset}";
         }
 
         private void CopyBlocks()
@@ -1463,7 +1625,7 @@ namespace TestTrailer
             var wheels = new StringBuilder();
             foreach (var wheel in _wheels)
                 wheels.Append($"; {wheel.Name} ").Append(wheel.Grounded
-                    ? $"{GroundName(wheel.GroundId)} {wheel.Compression * 100f:0.0} cm {wheel.Force:0} N, {wheel.Surface} grip {wheel.Grip:0.00} μ {(wheel.Sliding ? wheel.SlideMu : wheel.PeakMu):0.00} " +
+                    ? $"{GroundName(wheel.GroundId)} {wheel.Compression * 100f:0.0} cm{(wheel.AtBumpStop ? " AT BUMP STOP" : "")} {wheel.Force:0} N, {wheel.Surface} grip {wheel.Grip:0.00} μ {(wheel.Sliding ? wheel.SlideMu : wheel.PeakMu):0.00} " +
                       $"{(wheel.Sliding ? "sliding" : "sticking")} {wheel.Offset * 100f:+0.0;-0.0;0.0} cm, slip {wheel.LateralSlip:+0.00;-0.00;0.00} m/s"
                     : "air");
             MelonLogger.Msg($"Test Trailer telemetry: {Preset.Name}, car {carSpeed * 3.6f:0.0} km/h, trailer {trailerSpeed * 3.6f:0.0} km/h, angle {yaw:+0.0;-0.0;0.0}°, " +
@@ -1619,13 +1781,59 @@ namespace TestTrailer
             _look.transform.SetPositionAndRotation(U(pos), U(rot));
             if (_draw == Draw.Measuring)
                 Sample(carDrawnPos, carDrawnRot, N(_carBody.position), Q(_carBody.rotation), _carBody.linearVelocity.magnitude > MeasureSpeed);
+            // The wheels: each turned on by this frame's ground speed at it (smooth at any frame rate), about the axle
+            float frame = Time.deltaTime;
+            var forward = N3.Transform(Forward, trailerRot);
             foreach (var wheel in _wheels)
             {
                 if (wheel.Visual == null)
                     continue;
-                wheel.Visual.localPosition = U(wheel.Hub);
+                var hub = wheel.Hub;
+                // On the ground (and for half a second after leaving it) it turns at the ground speed; then it slows
+                wheel.AirTime = wheel.Grounded ? 0f : wheel.AirTime + frame;
+                if (wheel.AirTime <= SpinInAir)
+                {
+                    var v = Body.GetPointVelocity(U(trailerPos + N3.Transform(hub, trailerRot)));
+                    float speed = v.x * forward.X + v.y * forward.Y + v.z * forward.Z;
+                    wheel.SpinSpeed = speed / wheel.Radius * (180f / (float)Math.PI);
+                }
+                else
+                    wheel.SpinSpeed *= (float)Math.Exp(-frame / SpinInAir);
+                wheel.Spin = (wheel.Spin + wheel.SpinSpeed * frame) % 360f;
+                wheel.Visual.localPosition = U(hub);
                 float half = wheel.Spin * (float)Math.PI / 360f;
                 wheel.Visual.localRotation = new Quaternion((float)Math.Sin(half), 0f, 0f, (float)Math.Cos(half));
+            }
+            // The leaf springs: their ends under the hangers, their middles on the axle under each rail, never higher
+            // than just under the rails
+            var l = Layout;
+            float endY = l.AxleY + AxleLook.SpringTop - AxleLook.Leaf / 2f, topY = l.RailBottom - AxleLook.Leaf / 2f - 0.005f;
+            foreach (var (index, side, end, leaf) in _leaves)
+            {
+                if (leaf == null || 2 * index + 1 >= _wheels.Length)
+                    continue;
+                var a = _wheels[2 * index].Hub;
+                var b = _wheels[2 * index + 1].Hub;
+                float x = side * l.RailX, t = Math.Abs(b.X - a.X) > 1e-3f ? (x - a.X) / (b.X - a.X) : 0.5f;
+                float axleY = a.Y + (b.Y - a.Y) * t, z = l.Axles[index];
+                var middle = new N3(x, Math.Min(axleY + AxleLook.SpringTop - AxleLook.Leaf / 2f, topY), z);
+                var tip = new N3(x, endY, z + end * AxleLook.SpringHalf);
+                var d = middle - tip;
+                float length = d.Length();
+                float angle = (float)Math.Atan2(-d.Y, d.Z * -end) * -end;
+                leaf.localPosition = U((middle + tip) / 2f);
+                leaf.localRotation = new Quaternion((float)Math.Sin(angle / 2f), 0f, 0f, (float)Math.Cos(angle / 2f));
+                leaf.localScale = new Vector3(AxleLook.LeafWidth, AxleLook.Leaf, Math.Max(0.01f, length + 0.02f));
+            }
+            // The axles between their wheels' hubs, rolled with them
+            for (int i = 0; i < _axleLooks.Count && 2 * i + 1 < _wheels.Length; i++)
+            {
+                var a = _wheels[2 * i].Hub;
+                var b = _wheels[2 * i + 1].Hub;
+                var axle = _axleLooks[i];
+                axle.localPosition = U((a + b) / 2f);
+                float roll = (float)Math.Atan2(b.Y - a.Y, b.X - a.X);
+                axle.localRotation = new Quaternion(0f, 0f, (float)Math.Sin(roll / 2f), (float)Math.Cos(roll / 2f));
             }
         }
 

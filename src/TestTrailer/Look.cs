@@ -28,17 +28,21 @@ namespace TestTrailer
     }
 
     // Where the parts of a size go in the trailer's space (the coupling at the origin) for a ground height under the
-    // coupling: the drawbar level at the coupling's height, the body's floor there too (so the clearance under the body
-    // is the hitch's height), the wheels beside the body at ground + radius, the axle (the tandem's middle) where the
-    // body's centre of mass puts 11 % of the mass on the ball
+    // coupling (spec 04): each axle hangs under the frame on leaf springs as a car's body on its axles – the axle's
+    // centre at ground + the wheel's radius (static), the frame rails' underside 0.15 m over it, the rails 0.12 m deep,
+    // the drawbar's line at their middle, the floor on them; the body on the frame between the wheels, the wheels beside
+    // it under fenders 0.13 m over their static top. The drawbar runs level from the frame and steps to the hitch's
+    // height at 45° near the coupling (a Z). The axle (the tandem's middle) where the body's centre of mass puts 11 % of
+    // the mass on the ball.
     internal sealed class Layout
     {
         public const float TandemSpacing = 0.9f, TyreGap = 0.04f, Tongue = 0.11f;
         public const float BarHalf = 0.05f, HeadLength = 0.2f, Chamfer = 0.25f;
+        public const float Springs = 0.15f, Frame = 0.12f, FenderGap = 0.13f, MaxStep = 0.6f;
 
         public readonly Preset Preset;
         public readonly WheelSpec Wheels;
-        public readonly float Ground, FloorY, Front, Back, AxleZ, WheelX, HubY;
+        public readonly float Ground, AxleY, RailBottom, LineY, FloorY, Step, StepStart, FenderY, Front, Back, AxleZ, WheelX, HubY, RailX;
         public readonly float[] Axles;
         public readonly N3 BodyCentre, BodySize, Com;
         public readonly bool Chamfered;
@@ -48,7 +52,15 @@ namespace TestTrailer
             Preset = preset;
             Wheels = wheels;
             Ground = ground;
-            FloorY = 0f;
+            HubY = AxleY = ground + wheels.Radius;
+            RailBottom = AxleY + Springs;
+            LineY = RailBottom + Frame / 2f;
+            FloorY = RailBottom + Frame;
+            // The Z: from the drawbar's line up (or down) to the coupling's height (0) at 45°, its run |step|, beginning
+            // 0.2 + |step| before the coupling
+            Step = 0f - LineY;
+            StepStart = -(HeadLength + Math.Abs(Step));
+            FenderY = AxleY + wheels.Radius + FenderGap;
             Front = -preset.Drawbar;
             Back = Front - preset.Length;
             BodyCentre = new N3(0f, FloorY + preset.Height / 2f, (Front + Back) / 2f);
@@ -62,11 +74,22 @@ namespace TestTrailer
             float beside = preset.Width / 2f + TyreGap + wheels.Width / 2f;
             // L: the car's own track, or the body's width and a tyre, whichever is wider
             WheelX = preset.Axles > 1 ? Math.Max(beside, Math.Max(wheels.Track, preset.Width + wheels.Width) / 2f) : beside;
-            HubY = ground + wheels.Radius;
+            RailX = preset.Width / 2f - 0.2f;
             Chamfered = preset.Name != "S";
         }
 
         public float TonguePercent => 100f * (Com.Z - AxleZ) / (0f - AxleZ);
+
+        // The step the Z must make, and whether it is within what the trailer can take (±0.6 m)
+        public bool StepFits => Math.Abs(Step) <= MaxStep;
+    }
+
+    // The axle's look: its leaf springs (0.7 m long) and their top over the axle's centre at rest. Each spring hangs
+    // from its two hangers by its ends and rests on the axle by its middle: the ends stay under the hangers, the middle
+    // moves with the axle (its arch shortening as the axle rises), never higher than just under the frame's rails.
+    internal static class AxleLook
+    {
+        public const float SpringHalf = 0.35f, SpringTop = 0.095f, Leaf = 0.03f, LeafWidth = 0.07f;
     }
 
     internal static class Look
@@ -93,6 +116,9 @@ namespace TestTrailer
         // The body (its lower front and rear edges chamfered on M and L), the level drawbar from the body's front to the
         // coupling head (its tip on the origin), a fender over each side's wheels, and the hangers from the floor down to
         // the axles
+        // The body (its lower front and rear edges chamfered on M and L) on its frame rails, the Z drawbar from the
+        // frame to the coupling head (its tip on the origin), the spring hangers under the rails, a fender over each
+        // side's wheels. The axles and their springs are drawn with the wheels (AxleLook), as they move with them.
         public static Shape Body(Layout l)
         {
             var shape = new Shape();
@@ -106,25 +132,58 @@ namespace TestTrailer
             if (c <= 0f)
                 profile = new List<(float z, float y)> { (l.Front, top), (l.Front, bottom), (l.Back, bottom), (l.Back, top) };
             shape.Prism(profile, p.Width / 2f);
-            shape.Rod(new N3(0f, -Layout.BarHalf, l.Front + 0.01f), new N3(0f, -Layout.BarHalf, -Layout.HeadLength), Layout.BarHalf);
+            // The frame: two rails under the body, 0.12 m deep, from its back to its front, a cross member at each end
+            float railY = l.RailBottom + Layout.Frame / 2f;
+            foreach (float side in new[] { -1f, 1f })
+                shape.Box(new N3(side * l.RailX, railY, (l.Front + l.Back) / 2f), new N3(0.04f, Layout.Frame / 2f, p.Length / 2f));
+            foreach (float z in new[] { l.Front - 0.04f, l.Back + 0.04f })
+                shape.Box(new N3(0f, railY, z), new N3(l.RailX, Layout.Frame / 2f - 0.01f, 0.04f));
+            // The Z drawbar: level at the drawbar's line from the frame's front, a 45° step to the coupling's height,
+            // level again for the last 0.2 m into the coupling head
+            var low = new N3(0f, l.LineY, l.StepStart);
+            var high = new N3(0f, 0f, -Layout.HeadLength);
+            if (Math.Abs(l.Step) > 0.01f)
+            {
+                // the two rods overlap by the bar's half width at the bend, so it shows no notch
+                var along = N3.Normalize(high - low);
+                shape.Rod(new N3(0f, l.LineY, l.Front - 0.04f), low + new N3(0f, 0f, Layout.BarHalf), Layout.BarHalf);
+                shape.Rod(low - along * Layout.BarHalf, high, Layout.BarHalf);
+            }
+            else
+                shape.Rod(new N3(0f, l.LineY, l.Front - 0.04f), high, Layout.BarHalf);
             shape.Box(new N3(0f, 0f, -Layout.HeadLength / 2f), new N3(0.06f, 0.05f, Layout.HeadLength / 2f));
+            // The spring hangers: under the rails at each spring's ends, from the rails down to the springs' top at rest
+            foreach (float z in l.Axles)
+                foreach (float side in new[] { -1f, 1f })
+                    foreach (float end in new[] { -AxleLook.SpringHalf, AxleLook.SpringHalf })
+                        shape.Box(new N3(side * l.RailX, (l.RailBottom + l.AxleY + AxleLook.SpringTop) / 2f, z + end),
+                            new N3(0.025f, Math.Max(0.005f, (l.RailBottom - l.AxleY - AxleLook.SpringTop) / 2f), 0.025f));
+            // Fenders 0.13 m over the wheels' static top, joined to the body
             var w = l.Wheels;
             float first = l.Axles[0] + w.Radius + 0.05f, last = l.Axles[l.Axles.Length - 1] - w.Radius - 0.05f;
-            float fenderY = Math.Max(l.HubY + w.Radius + 0.06f, bottom - 0.02f);
             foreach (float side in new[] { -1f, 1f })
             {
-                shape.Box(new N3(side * l.WheelX, fenderY, (first + last) / 2f), new N3(w.Width / 2f + 0.04f, 0.02f, (first - last) / 2f));
-                // the fender's inner edge up to the body when it sits under the floor
-                if (fenderY < bottom)
-                    shape.Box(new N3(side * (p.Width / 2f - 0.02f), (fenderY + bottom) / 2f, (first + last) / 2f), new N3(0.02f, (bottom - fenderY) / 2f, (first - last) / 2f));
+                shape.Box(new N3(side * l.WheelX, l.FenderY, (first + last) / 2f), new N3(w.Width / 2f + 0.04f, 0.02f, (first - last) / 2f));
+                float inner = p.Width / 2f, outer = l.WheelX - w.Width / 2f - 0.04f;
+                if (outer > inner + 0.01f)
+                    shape.Box(new N3(side * (inner + outer) / 2f, l.FenderY, (first + last) / 2f), new N3((outer - inner) / 2f, 0.02f, (first - last) / 2f));
             }
-            foreach (float z in l.Axles)
-            {
-                shape.Box(new N3(0f, l.HubY, z), new N3(l.WheelX - w.Width / 2f, 0.035f, 0.035f));
-                if (l.HubY < bottom)
-                    foreach (float side in new[] { -1f, 1f })
-                        shape.Box(new N3(side * (p.Width / 2f - 0.12f), (l.HubY + bottom) / 2f, z), new N3(0.04f, (bottom - l.HubY) / 2f, 0.04f));
-            }
+            return shape;
+        }
+
+        // One axle as it moves with its wheels, round its own centre: the beam across from hub to hub
+        public static Shape Axle(Layout l)
+        {
+            var shape = new Shape();
+            shape.Box(new N3(0f, 0f, 0f), new N3(l.WheelX - l.Wheels.Width / 2f, 0.035f, 0.035f));
+            return shape;
+        }
+
+        // A unit box (1 m each way round its centre): a leaf spring's half, scaled and turned every frame
+        public static Shape Unit()
+        {
+            var shape = new Shape();
+            shape.Box(new N3(0f, 0f, 0f), new N3(0.5f, 0.5f, 0.5f));
             return shape;
         }
 

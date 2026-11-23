@@ -7,7 +7,7 @@ before real trailers are built. Not a mod for players yet and not on Nexus.
 The spec, the game's facts it rests on and the stages, each played before the next: [`docs/test-trailer.md`](docs/test-trailer.md).
 What comes next, in order: [`docs/specs/`](docs/specs/README.md).
 
-## What it does (0.0.3)
+## What it does (0.0.4)
 
 - **N** hitches a trailer behind the car you drive, solo or as the host (not as a client yet), only with the car
   standing, upright and with room behind it. **Shift+N** picks the next size and rebuilds a hitched trailer. **F11**
@@ -19,9 +19,17 @@ What comes next, in order: [`docs/specs/`](docs/specs/README.md).
   each wheel (the game's ground materials). The wheels stick sideways and slide past the grip, so a parked trailer
   holds on a slope. The wheels' forces go in once per physics step, in Fusion's own step (`OnBeforeSimulate` of its
   physics add-on).
+- **The body on its axle:** each axle hangs under the frame on leaf springs, as a car's body on its axles – the axle at
+  ground + the wheel's radius, the frame 0.15 m over it, the floor on the frame (0.69 m over the ground on the
+  Protector's wheels, 0.79 m on the Mammoth's), so the centre of mass sits low whatever the hitch's height. The wheels
+  rise at most 0.10 m over their static height (a bump stop), under fenders 0.13 m over their top; the axles and
+  springs move with them.
 - **The hitch:** a ball joint on the tow ball (estimated from the tow bar when it is fitted) or on the winch's rear
-  attach point every car has. Free to roll, pitch ±45° soft, a soft stop at 85° of turn. The drawbar is level and the
-  floor at the hitch's height.
+  attach point every car has. Free to roll, pitch ±45° soft, a soft stop at 85° of turn. A Z drawbar: level from the
+  frame, then a 45° step up or down to the hitch's height near the coupling; a hitch more than 0.6 m above or below the
+  drawbar's line is refused.
+- **The wheels drawn straight:** copies of the car's wheels, the side from the car's own wheel, none of the live
+  wheel's camber, toe or spin kept, turning about their axle every drawn frame at the ground speed.
 - **Drawing:** the trailer is drawn from the drawn car (Fusion's interpolation target), so it moves as smoothly; after
   a few seconds of driving it decides whether it also needs its own interpolation and says so in the log.
 - **Safety:** it detaches itself, saying why, when the hitch is overloaded, it jackknifes past 110°, it or the car
@@ -35,9 +43,13 @@ the box wears a plain copy of the car body's material; true: Unity's URP Lit).
 
 ## History
 
+- **0.0.4** – stage 4 ([`docs/specs/04-axle-and-z-drawbar.md`](docs/specs/04-axle-and-z-drawbar.md)): the body on its
+  axle on leaf springs (the floor and the centre of mass down by 0.10–0.31 m), a Z drawbar, a bump stop, the wheels drawn
+  straight (no figure eight). Not played yet.
 - **0.0.3** – stage 3: the car's own wheels and grip, stick-slip, the trailer drawn from the drawn car, the box no
-  longer meeting the ground, roll free at the hitch, a soft yaw stop, L lower and wider, longer rays at hitching. Not
-  played yet.
+  longer meeting the ground, roll free at the hitch, a soft yaw stop, L lower and wider, longer rays at hitching.
+  Played on 24 November 2026 («очень хорошо, трейлер ведёт себя сильно лучше»): calm on the Protector; on the Mammoth
+  the L, its floor at 1.1 m, turned over twice on slopes, and the wheels wobbled in a figure eight.
 - **0.0.2** – stage 2, the first towed body (the core of the earlier Trailer Lab prototype with its wheels stepped in
   Fusion's step). Played on the Mammoth and a Protector: it drives and its wheels find the ground; it crept sideways on
   slopes, jerked while driving, its long box caught bumps, and two tight turns ended in a jackknife.

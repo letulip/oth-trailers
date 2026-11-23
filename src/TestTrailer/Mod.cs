@@ -8,12 +8,12 @@ using UnityEngine.SceneManagement;
 using Il2Cpp;
 using Il2CppVehiclePhysics;
 
-[assembly: MelonInfo(typeof(TestTrailer.Mod), "TestTrailer", "0.0.3", "letulip")]
+[assembly: MelonInfo(typeof(TestTrailer.Mod), "TestTrailer", "0.0.4", "letulip")]
 [assembly: MelonGame]
 
 namespace TestTrailer
 {
-    // A test bench for trailers (docs/test-trailer.md). 0.0.3 is its stages 0 to 3: the probe (what the game's physics
+    // A test bench for trailers (docs/test-trailer.md). 0.0.4 is its stages 0 to 4: the probe (what the game's physics
     // and Fusion run, this player's car's body, hitch point, wheels' ground, layer row, keys – logs only) and a box
     // on wheels towed behind this player's car as a body of its own (solo or host). Nothing is sent and nothing goes
     // into the save.

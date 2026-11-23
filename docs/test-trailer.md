@@ -417,3 +417,42 @@ sliding and the hitch force's spread and jump; at the end the summary with the l
 5. On two different cars: are the trailer's wheels the car's own, and does it look as smooth as the car while driving?
 
 Send `MelonLoader/Latest.log`; a screenshot or a clip of any jerk or creep.
+
+## 10. Stage 4 build (0.0.4)
+
+Built by [`specs/04-axle-and-z-drawbar.md`](specs/04-axle-and-z-drawbar.md), after 0.0.3 was played on 24 November 2026
+(`Latest (58).log`): the floor no longer at the hitch's height but on the frame over the axle (axle centre at ground +
+the wheel's radius, leaf springs 0.15 m, frame 0.12 m, the drawbar's line at the frame's middle, the floor on it), the
+centre of mass a quarter of the body's height over that floor for L, a third for S and M, the axle placed for 11 % on
+the ball as before; a Z drawbar from that line to the hitch at 45° (refused past 0.6 m either way; its two rods overlap
+at the bend); fenders 0.13 m over the static wheel top; the axles drawn with the wheels and 0.7 m leaf springs hung by
+their ends under the hangers, their middles riding on the axle (never into the rails, never more than their arch below
+the hangers); the copied wheels straight – the side from the car's own wheels (`WheelTransformUpdater.m_isLeftWheel`
+only when the two corners' flags disagree, else the nodes' x in car space), the base turn identity for a left wheel and
+180° about up for a right one (as every car's prefab has its right LODGroup node), the turn of the updater's
+`wheelTransform` and the nodes between it and the copy reset, the scale the source's absolute, the spin about the axle
+advanced every drawn frame from the ground speed while the wheel is on the ground or within 0.5 s of leaving it, then
+slowing.
+
+**The bump stop** (reviewed): a linear ramp from 0.04 to 0.10 m over the static height; its stiffness from each wheel's
+effective vertical mass (the body free: 1 / (1/M + z²/Ix + x²/Iz) at the wheel's place round the centre of mass, about
+125 kg for S) so that ω·dt = 0.9 at the 50 Hz step with the spring counted; its own damper while compressing at ζ 0.7;
+the compression predicted one step ahead (now + dt × the closing speed) so a fast wheel does not skip the ramp; its
+force in a step at most what stops the wheel's mass plus its weight; and the wheel's whole normal force (spring, damper,
+bump) at most 8 × its weight. At hitching no wheel may start inside the ramp: if one would, the trailer is pitched up
+round the coupling until the highest wheel is at most 0.03 m over its static height, or it is refused («the ground
+behind the car is too uneven»).
+
+**Log lines** at hitching: «Test Trailer: size M hitched to '…': … floor x m over the ground on its axle(s) (axle centre
+a m + springs 0.15 + frame 0.12), drawbar line l m, step ±s m over r m (Z, 45°), the hitch h m over the ground …»;
+«Test Trailer: wheels: side from the car's wheel (…), base rotation identity (left) / 180° about up (right); left from
+'…': camber c° and toe t° of the source dropped, wheelTransform … ; … bump stop at +0.10 m over static (a linear ramp
+from +0.04 m, stiffness k N/m and damper c N·s/m from the smallest effective wheel mass m kg, ω·dt …)»; the wheels at
+hitching one line per axle («axle at z …: left … ; right …», and «pitched up x° more so no wheel starts in its bump stop»
+when it had to); a refusal «… not hitched: the hitch is x m over the drawbar's line, y m more than the Z's 0.6 m» with
+«The hitch is y m too high/low for this trailer» on the screen. In the telemetry a wheel at its bump stop reads
+«AT BUMP STOP».
+
+**The run** (the spec's): on the Protector and the Mammoth, each size – the wheels from the side at 20–40 km/h (no
+wobble), the Z (the step at the car's end, level elsewhere), bumps (no wheel through a fender or the frame); the L on
+the Mammoth across the kind of slope that turned it over in 0.0.3; a tight turn and a crest. Send `Latest.log`.

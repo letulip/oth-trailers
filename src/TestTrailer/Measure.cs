@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Il2Cpp;
 using Il2CppVehiclePhysics;
 using UnityEngine;
 using N3 = System.Numerics.Vector3;
@@ -46,26 +47,36 @@ namespace TestTrailer
             public readonly List<Wheel> Wheels = new();
         }
 
-        // The car's own rear wheels, which the trailer's copy: radius, tyre width, suspension travel, track, and the
-        // colliders and drawn wheels (Axles/WheelMeshes/RL and RR) to copy
+        // The car's own rear wheels, which the trailer's copy: radius, tyre width and suspension travel from their
+        // colliders, the track, and the drawn wheels (the LODGroup under Axles/WheelMeshes/RL and RR) to copy, each with
+        // the game's WheelTransformUpdater over it. Which drawn wheel is the left one comes from the car's own wheel – the
+        // updater's m_isLeftWheel, else the collider's x in car space – not from the corner's name or the copy's axes.
         public sealed class CarWheels
         {
             public VPFunselektor3DRaycastWheelCollider Left, Right;
             public float Radius, Width, Travel, Track;
             public Transform LeftLook, RightLook;
+            public WheelTransformUpdater LeftUpdater, RightUpdater;
+            public string SideHow = "no drawn wheels found";
         }
 
         public static CarWheels RearWheels(Transform root)
         {
             var wheels = new CarWheels();
             var colliders = root.Find("Axles/WheelColliders");
+            VPFunselektor3DRaycastWheelCollider rl = null, rr = null;
             if (colliders != null)
             {
-                var rl = colliders.Find("WheelRL");
-                var rr = colliders.Find("WheelRR");
-                wheels.Left = rl != null ? rl.GetComponent<VPFunselektor3DRaycastWheelCollider>() : null;
-                wheels.Right = rr != null ? rr.GetComponent<VPFunselektor3DRaycastWheelCollider>() : null;
+                var nl = colliders.Find("WheelRL");
+                var nr = colliders.Find("WheelRR");
+                rl = nl != null ? nl.GetComponent<VPFunselektor3DRaycastWheelCollider>() : null;
+                rr = nr != null ? nr.GetComponent<VPFunselektor3DRaycastWheelCollider>() : null;
             }
+            // the colliders' own sides by their x
+            if (rl != null && rr != null && ToCar(root, rl.transform.position).X > ToCar(root, rr.transform.position).X)
+                (rl, rr) = (rr, rl);
+            wheels.Left = rl;
+            wheels.Right = rr;
             var any = wheels.Left ?? wheels.Right;
             if (any != null)
             {
@@ -75,18 +86,65 @@ namespace TestTrailer
             }
             if (wheels.Left != null && wheels.Right != null)
                 wheels.Track = Math.Abs(ToCar(root, wheels.Right.transform.position).X - ToCar(root, wheels.Left.transform.position).X);
-            wheels.LeftLook = WheelLook(root, "RL");
-            wheels.RightLook = WheelLook(root, "RR");
+            var a = WheelLook(root, "RL", out var ua);
+            var b = WheelLook(root, "RR", out var ub);
+            var how = new List<string>();
+            bool? aLeft = Side(root, a, ua, b, ub, how);
+            if (aLeft == false)
+            {
+                (a, b) = (b, a);
+                (ua, ub) = (ub, ua);
+            }
+            wheels.LeftLook = a;
+            wheels.RightLook = b;
+            wheels.LeftUpdater = ua;
+            wheels.RightUpdater = ub;
+            if (how.Count > 0)
+                wheels.SideHow = string.Join(", ", how);
             return wheels;
         }
 
-        // The drawn wheel of a corner as the car wears it now: the LODGroup node under Axles/WheelMeshes/<corner> (its
-        // parent has the game's WheelTransformUpdater, which stays out of the copy)
-        private static Transform WheelLook(Transform root, string corner)
+        // Whether the RL corner's drawn wheel is the left one: the updaters' m_isLeftWheel only when the two corners'
+        // flags disagree (one left, one right), else the two nodes' x in car space
+        private static bool? Side(Transform root, Transform a, WheelTransformUpdater ua, Transform b, WheelTransformUpdater ub, List<string> how)
         {
+            if (a == null && b == null)
+                return null;
+            try
+            {
+                if (ua != null && ub != null && ua.m_isLeftWheel != ub.m_isLeftWheel)
+                {
+                    how.Add($"by the updaters' m_isLeftWheel (RL {(ua.m_isLeftWheel ? "left" : "right")}, RR {(ub.m_isLeftWheel ? "left" : "right")})");
+                    return ua.m_isLeftWheel;
+                }
+                if (ua != null && ub != null)
+                    how.Add($"the updaters' m_isLeftWheel agree ({ua.m_isLeftWheel}), so");
+            }
+            catch (Exception)
+            {
+                how.Add("m_isLeftWheel unread, so");
+            }
+            if (a != null && b != null)
+            {
+                bool aLeft = ToCar(root, a.position).X < ToCar(root, b.position).X;
+                how.Add($"by the nodes' x in car space (RL {(aLeft ? "left" : "right")})");
+                return aLeft;
+            }
+            var one = a ?? b;
+            bool left = ToCar(root, one.position).X < 0f;
+            how.Add($"by the one node's x ({(left ? "left" : "right")})");
+            return a != null ? left : !left;
+        }
+
+        // The drawn wheel of a corner as the car wears it now: the LODGroup node under Axles/WheelMeshes/<corner>, and the
+        // game's WheelTransformUpdater over it (which stays out of the copy)
+        private static Transform WheelLook(Transform root, string corner, out WheelTransformUpdater updater)
+        {
+            updater = null;
             var node = root.Find("Axles/WheelMeshes/" + corner);
             if (node == null)
                 return null;
+            updater = node.GetComponentInChildren<WheelTransformUpdater>(true);
             var group = node.GetComponentInChildren<LODGroup>(true);
             return group != null ? group.transform : null;
         }
