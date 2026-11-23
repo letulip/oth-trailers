@@ -5,6 +5,7 @@ on wheels in three sizes behind any car, with numbers in the log, to learn how a
 before real trailers are built. Not a mod for players yet and not on Nexus.
 
 The spec, the game's facts it rests on and the stages, each played before the next: [`docs/test-trailer.md`](docs/test-trailer.md).
+What comes next, in order: [`docs/specs/`](docs/specs/README.md).
 
 ## What it does (0.0.3)
 
