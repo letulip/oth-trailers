@@ -4,11 +4,13 @@ Agreed with the owner on 24 November 2026, each step played before the next. Sta
 towed body, the car's own wheels) are in [`../test-trailer.md`](../test-trailer.md).
 
 1. [04 – the body on its axle, a Z drawbar, straight-running wheels](04-axle-and-z-drawbar.md) (TestTrailer 0.0.4)
-2. [05 – co-op: everyone tows, everyone sees every trailer](05-coop.md)
-3. [06 – unhitch and leave it, back up and hitch again](06-park-and-recouple.md)
-4. [07 – real trailers from the owner's pictures](07-models.md)
-5. [08 – overrun brakes and the trailer's lights](08-brakes-and-lights.md)
-6. [09 – buying a trailer and keeping it](09-garage-and-save.md)
+2. [10 – low weight, softer springs, a roll stop, the frame under the flat](10-roll-and-frame.md) (TestTrailer 0.0.5, added after
+   0.0.4's run)
+3. [05 – co-op: everyone tows, everyone sees every trailer](05-coop.md)
+4. [06 – unhitch and leave it, back up and hitch again](06-park-and-recouple.md)
+5. [07 – real trailers from the owner's pictures](07-models.md)
+6. [08 – overrun brakes and the trailer's lights](08-brakes-and-lights.md)
+7. [09 – buying a trailer and keeping it](09-garage-and-save.md)
 
 Each step: an implementing agent, an independent reviewer, the lead's acceptance (build, checks), then the owner's run
 and log.
