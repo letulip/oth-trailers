@@ -4,3 +4,7 @@ dist/
 **/bin/
 **/obj/
 .DS_Store
+
+# Authors' source models stay local (models/source); the bench embeds what tools/bake_model.py makes of them
+models/source/
+preview/

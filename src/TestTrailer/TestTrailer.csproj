@@ -17,6 +17,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Authors' trailer bodies baked by tools/bake_model.py (spec 11) -->
+    <EmbeddedResource Include="Models/*.bin" LogicalName="TestTrailer.Models.%(Filename).bin" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="LavaGang.MelonLoader" Version="0.7.3" PrivateAssets="all" ExcludeAssets="runtime" />
   </ItemGroup>
 

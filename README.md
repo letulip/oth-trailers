@@ -7,28 +7,29 @@ before real trailers are built. Not a mod for players yet and not on Nexus.
 The spec, the game's facts it rests on and the stages, each played before the next: [`docs/test-trailer.md`](docs/test-trailer.md).
 What comes next, in order: [`docs/specs/`](docs/specs/README.md).
 
-## What it does (0.0.5)
+## What it does (0.0.7)
 
 - **N** hitches a trailer behind the car you drive, solo or as the host (not as a client yet), only with the car
   standing, upright and with room behind it. **Shift+N** picks the next size and rebuilds a hitched trailer. **F11**
   writes the probe into the log again. The keys work only while driving.
-- **Sizes:** S 2.4 m long and 350 kg, M 3.6 m and 800 kg, L 4.6 m and 1400 kg on a tandem axle as wide as the car;
+- **Sizes:** S 2.4 m long and 350 kg, M 3.6 m and 800 kg, L 4.6 m and 1400 kg on a tandem axle (0.92 m apart);
   11 % of the mass on the ball.
 - **The trailer:** a rigid body of its own with a box collider that meets trees, rocks and cars but not the ground.
-  The towing car's own wheels: their size, the tyres the car wears, its tyre friction on the grip of the surface under
-  each wheel (the game's ground materials). The wheels stick sideways and slide past the grip, so a parked trailer
+  One wheel set on every car: 0.40 m radius, 0.35 m travel, drawn as the towing car's own rear wheel scaled to that
+  size (a big wheel down, a small one up); the car's tyre friction on the grip of the surface under each wheel (the
+  game's ground materials). The wheels stick sideways and slide past the grip, so a parked trailer
   holds on a slope. The wheels' forces go in once per physics step, in Fusion's own step (`OnBeforeSimulate` of its
   physics add-on).
 - **The body on its axle:** each axle hangs under the frame on leaf springs, as a car's body on its axles – the axle at
-  ground + the wheel's radius, the frame 0.15 m over it, the floor on the frame (0.69 m over the ground on the
-  Protector's wheels, 0.79 m on the Mammoth's), so the centre of mass sits low whatever the hitch's height. The wheels
+  ground + 0.40 m, the frame 0.15 m over it, the floor on the frame 0.67 m over the ground behind every car; when the
+  drawbar would step more than 0.40 m up to the ball, the frame goes up 0.10 m (a 4" lift: 0.77 m on the Mammoth). The wheels
   rise at most 0.10 m over their static height (a bump stop), under fenders 0.13 m over their top; the axles and
   springs move with them.
 - **The hitch:** a ball joint on the tow ball (estimated from the tow bar when it is fitted) or on the winch's rear
   attach point every car has. Free to roll, pitch ±45° soft, a soft stop at 85° of turn. A Z drawbar: level from the
   frame, then a 45° step up or down to the hitch's height near the coupling; a hitch more than 0.6 m above or below the
   drawbar's line is refused.
-- **The wheels drawn straight:** copies of the car's wheels, the side from the car's own wheel, none of the live
+- **The wheels drawn straight:** copies of the car's wheels scaled to 0.40 m, the side from the car's own wheel, none of the live
   wheel's camber, toe or spin kept, turning about their axle every drawn frame at the ground speed.
 - **Drawing:** the trailer is drawn from the drawn car (Fusion's interpolation target), so it moves as smoothly; after
   a few seconds of driving it decides whether it also needs its own interpolation and says so in the log.
@@ -43,6 +44,13 @@ the box wears a plain copy of the car body's material; true: Unity's URP Lit).
 
 ## History
 
+- **0.0.7** – [`docs/specs/12-one-wheel-set.md`](docs/specs/12-one-wheel-set.md): one 0.40 m wheel on every car (the car's
+  own rim and tyre scaled to it), the trailer at the same height behind every car; the Z drawbar takes the ball's
+  height, and a 0.10 m (4") lift when it would step more than 0.40 m. Played on 24 November 2026 (38 min, M on the
+  Protector, Brick, BlastWagon, Mammoth – lifted – and Rust Ox, S and L on the Brick; no errors).
+- **0.0.6** – [`docs/specs/11-first-model.md`](docs/specs/11-first-model.md): M is the author's first model (`Trailer
+  V1.fbx`, baked by `tools/bake_model.py`: its own wheels, axle, springs, chassis, coupler and jockey wheel dropped) on
+  our frame, the car's wheels in its arches. Played with 0.0.7's wheels.
 - **0.0.5** – [`docs/specs/10-roll-and-frame.md`](docs/specs/10-roll-and-frame.md): each size's weight packed low
   (the centre of mass at the floor + 0.2 of the box's height, S 0.15; the mass unchanged), springs 1.2 Hz (were 1.7), a
   soft roll stop at the coupling past ±25° against the car, the frame's rails as long as the flat bottom (square ends), a collider

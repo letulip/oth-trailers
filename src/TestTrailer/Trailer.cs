@@ -365,13 +365,21 @@ namespace TestTrailer
             var hitch = Measure.HitchOf(root);
             var ground = Measure.GroundOf(root);
             var carWheels = Measure.RearWheels(root);
+            // One wheel set on every car (spec 12): radius 0.40 m, travel 0.35 m; the car's rear wheel drawn scaled to it
+            bool found = carWheels.Radius > 0.1f;
+            float carRadius = found ? carWheels.Radius : WheelSpec.Standard;
+            float carWidth = carWheels.Width > 0.05f ? carWheels.Width : 0.25f;
+            float scale = WheelSpec.Standard / carRadius;
             var spec = new WheelSpec
             {
-                Radius = carWheels.Radius > 0.1f ? carWheels.Radius : preset.Radius,
-                Width = carWheels.Width > 0.05f ? carWheels.Width : 0.25f,
-                Travel = Math.Min(carWheels.Travel > 0.05f ? carWheels.Travel : 0.3f, WheelSpec.MaxTravel),
+                Radius = WheelSpec.Standard,
+                Width = carWidth * scale,
+                Travel = WheelSpec.MaxTravel,
                 Track = carWheels.Track,
-                From = carWheels.Left != null || carWheels.Right != null ? "the car's rear wheels" : "the size's own (the car's rear wheels not found)",
+                CarRadius = carRadius,
+                CarWidth = carWidth,
+                Scale = scale,
+                From = found ? "the car's rear wheels, scaled" : "plain (the car's rear wheels not found)",
             };
             var rig = new Rig(car, runner, preset, ground.Y - hitch.Point.Y, spec, carWheels) { _hitchCar = hitch.Point };
             try
@@ -579,7 +587,18 @@ namespace TestTrailer
             // on M and L a convex mesh of the chamfered body, so its ends do not catch where the chamfers are drawn
             // (spec 10); on S a box
             string colliderHow;
-            if (l.Chamfered)
+            if (Preset.Model != null)
+            {
+                // The author's body: a convex mesh of its body, roof and front box where the model stands (spec 11)
+                var hull = Look.ModelHull(Preset.Model, new N3(0f, l.FloorY, l.Front));
+                _assets.Add(hull);
+                var meshCollider = _go.AddComponent<MeshCollider>();
+                meshCollider.convex = true;
+                meshCollider.sharedMesh = hull;
+                _box = meshCollider;
+                colliderHow = $"convex mesh of the model's body ({hull.vertexCount} vertices)";
+            }
+            else if (l.Chamfered)
             {
                 var hull = Look.Hull(l);
                 _assets.Add(hull);
@@ -723,15 +742,18 @@ namespace TestTrailer
             Visuals();
 
             MelonLogger.Msg($"Test Trailer: size {Preset.Name} hitched to '{Car.Name}' ({_carMass:0} kg): {Preset.Mass:0} kg, body {Preset.Length} x {Preset.Width} x {Preset.Height} m " +
-                            $"{(l.Chamfered ? $"(lower edges chamfered {l.ChamferSize:0.00} m, the collider too; the rails as long as the flat bottom, square ends)" : "")}; " +
-                            $"floor {l.FloorY - l.Ground:0.000} m over the ground on its axle{(l.Axles.Length > 1 ? "s" : "")} (axle centre {l.AxleY - l.Ground:0.000} m + springs {Layout.Springs} + frame {Layout.Frame}), " +
+                            $"{(l.Chamfered ? $"(lower edges chamfered {l.ChamferSize:0.00} m, the collider too; the rails as long as the flat bottom, square ends)" : "")}" +
+                            $"{(Preset.Model != null ? $"(the author's model '{Preset.Model.Name}', drawbar {Preset.Drawbar:0.000} m to its front)" : Preset.ModelWhy != null ? $"(the box: the model was not read – {Preset.ModelWhy})" : "")}; " +
+                            $"floor {l.FloorY - l.Ground:0.000} m over the ground on its axle{(l.Axles.Length > 1 ? "s" : "")} (axle centre {l.AxleY - l.Ground:0.000} m + springs {Layout.Springs}{(l.Lift > 0f ? $" + lift {l.Lift:0.00}" : "")} + frame {Layout.Frame}), " +
+                            $"{(l.Lift > 0f ? $"lift 4\": the step would be {l.UnliftedStep:0.00} m, over {Layout.LiftAt}" : $"no lift (the step under {Layout.LiftAt} m)")}; " +
                             $"drawbar line {l.LineY - l.Ground:0.000} m, step {l.Step:+0.000;-0.000;0.000} m over {Math.Abs(l.Step):0.000} m (Z, 45°), the hitch {-l.Ground:0.000} m over the ground; " +
                             $"coupling at {Measure.F(_hitchCar)} car space – {hitch.Source}; ground ({ground.How})");
-            MelonLogger.Msg($"Test Trailer: wheels from {w.From}: radius {w.Radius:0.000} m, width {w.Width:0.000} m, travel {w.Travel:0.00} m (the car's {_carWheels.Travel:0.00}, at most {WheelSpec.MaxTravel}), " +
+            MelonLogger.Msg($"Test Trailer: wheels: one set, radius {w.Radius:0.000} m, from {w.From} (the car's rear wheel r {w.CarRadius:0.000} m, width {w.CarWidth:0.000} m, scaled by {w.Scale:0.000}), " +
+                            $"width {w.Width:0.000} m, travel {w.Travel:0.00} m (the car's {_carWheels.Travel:0.00}), " +
                             $"{_wheels.Length} of them at ±{l.WheelX:0.000} m (the car's track {w.Track:0.000}), axle{(l.Axles.Length > 1 ? "s" : "")} at z {string.Join(", ", Array.ConvertAll(l.Axles, z => z.ToString("0.000")))}{(l.Axles.Length > 1 ? $" ({l.Spacing:0.00} m apart: the wheel's diameter + {Layout.TandemGap} m, at least {Layout.TandemSpacing})" : "")}; " +
                             $"springs {_wheels[0].SpringOmega / (2f * Math.PI):0.00} Hz on the load (ω {_wheels[0].SpringOmega:0.00} rad/s, sag {_wheels[0].StaticCompression:0.000} m{(_wheels[0].SpringOmega > Wheel.Omega + 1e-3f ? ", stiffened: the travel is short" : "")}); looks: {looksHow}");
             MelonLogger.Msg($"Test Trailer: wheels: side from the car's wheel ({_carWheels.SideHow}), base rotation identity (left) / 180° about up (right); " +
-                            $"{(_wheelNotes.Count > 0 ? string.Join("; ", _wheelNotes) : "no copies")}; scale the source's absolute; spin about the axle each drawn frame from the ground speed; " +
+                            $"{(_wheelNotes.Count > 0 ? string.Join("; ", _wheelNotes) : "no copies")}; scale the source's absolute × {w.Scale:0.000}; spin about the axle each drawn frame from the ground speed; " +
                             $"bump stop at +{Wheel.BumpRise:0.00} m over static ({bumpHow}), fenders {Layout.FenderGap} m over the static wheel top");
             MelonLogger.Msg($"Test Trailer: grip: tyre {tireHow}; surfaces {surfaceHow}; friction used = the tyre's lateral peak (sticking) or limit (sliding) friction × the surface's grip");
             MelonLogger.Msg($"Test Trailer: mass: CoM {Measure.F(com)} trailer space, {com.Y - l.FloorY:0.000} m over the floor ({(com.Y - l.FloorY) / Preset.Height:0.00} of the body's height; " +
@@ -1010,6 +1032,9 @@ namespace TestTrailer
             var bodyMesh = Look.ToMesh(Look.Body(Layout), "TestTrailer");
             _assets.Add(bodyMesh);
             Part("Body", bodyMesh, material, _look.transform);
+            string modelHow = "";
+            if (Preset.Model != null)
+                modelHow = ModelLook(material) + "; ";
             Mesh fallback = null;
             int copied = 0;
             foreach (var wheel in _wheels)
@@ -1046,7 +1071,27 @@ namespace TestTrailer
                     foreach (float end in new[] { -1f, 1f })
                         _leaves.Add((i, side, end, Part($"Leaf {i + 1} {(side < 0f ? "left" : "right")} {(end < 0f ? "back" : "front")}", unit, material, _look.transform).transform));
             return $"{copied} of {_wheels.Length} wheels the car's own drawn wheels ({_stripped} other components taken off the copies, {_blocks.Count} renderers' property blocks copied)" +
-                   $"{(copied < _wheels.Length ? $", {_wheels.Length - copied} plain" : "")}; material {materialHow}";
+                   $"{(copied < _wheels.Length ? $", {_wheels.Length - copied} plain" : "")}; {modelHow}material {materialHow}";
+        }
+
+        // The author's model as the body (spec 11): one renderer, a copy of the trailer's material per colour, the model
+        // standing with its bottom on the floor and its front at the body's front
+        private string ModelLook(Material material)
+        {
+            var model = Preset.Model;
+            var mesh = Look.ModelMesh(model);
+            _assets.Add(mesh);
+            var materials = new Material[model.Parts.Count];
+            for (int i = 0; i < materials.Length; i++)
+            {
+                var part = model.Parts[i];
+                materials[i] = Look.Tinted(material, part.r, part.g, part.b, part.material);
+                _assets.Add(materials[i]);
+            }
+            var go = Part("Model " + model.Name, mesh, material, _look.transform);
+            go.transform.localPosition = U(new N3(0f, Layout.FloorY, Layout.Front));
+            go.GetComponent<MeshRenderer>().sharedMaterials = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray<Material>(materials);
+            return $"the body is {model.Describe()}, at y {Layout.FloorY:0.000} z {Layout.Front:0.000}, {materials.Length} tinted copies of the material";
         }
 
         // The copy is made under an inactive holder (so nothing in it wakes), stripped of every component but Transform,
@@ -1088,8 +1133,10 @@ namespace TestTrailer
                 // does not wobble); its size the absolute of the source's (a mirroring negative scale dropped)
                 var baseTurn = left ? NQ.Identity : RightTurn;
                 t.localRotation = U(baseTurn);
+                // ... and scaled as a whole to the trailer's wheel (spec 12): 0.40 m / the car's wheel's radius
                 var scale = source.lossyScale;
-                t.localScale = new Vector3(Math.Abs(scale.x), Math.Abs(scale.y), Math.Abs(scale.z));
+                float k = Layout.Wheels.Scale;
+                t.localScale = new Vector3(Math.Abs(scale.x) * k, Math.Abs(scale.y) * k, Math.Abs(scale.z) * k);
                 _wheelNotes.Add(Dropped(source, updater, copy.transform, baseTurn, left));
                 foreach (var component in copy.GetComponentsInChildren<Component>(true))
                 {

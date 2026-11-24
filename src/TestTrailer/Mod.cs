@@ -8,7 +8,7 @@ using UnityEngine.SceneManagement;
 using Il2Cpp;
 using Il2CppVehiclePhysics;
 
-[assembly: MelonInfo(typeof(TestTrailer.Mod), "TestTrailer", "0.0.5", "letulip")]
+[assembly: MelonInfo(typeof(TestTrailer.Mod), "TestTrailer", "0.0.7", "letulip")]
 [assembly: MelonGame]
 
 namespace TestTrailer
