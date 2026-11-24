@@ -14,16 +14,38 @@ namespace TestTrailer
     internal sealed class Preset
     {
         public string Name;
-        public float Length, Width, Height, Drawbar, Radius, Mass;
+        public float Length, Width, Height, Drawbar, Mass;
         public int Axles;
+        // An author's body in place of the box (spec 11), and why not when it could not be read
+        public TrailerModel Model;
+        public string ModelWhy;
+
+        // The size takes the model's body: its length, width and height, and the drawbar that puts the model's axle (under
+        // its arches) where 11 % of the mass on the ball puts the axle, the centre of mass at the body's middle. Without
+        // the model the box stays, and why is logged.
+        public static Preset Modelled(Preset preset, string model)
+        {
+            preset.Model = TrailerModel.Get(model, out preset.ModelWhy);
+            var m = preset.Model;
+            if (m == null)
+                return preset;
+            preset.Length = m.Length;
+            preset.Width = m.Width;
+            preset.Height = m.Height;
+            // axle behind the body's middle by a; com z = a / (1 - 1 / (1 - tongue)); the front at -(-com z - L / 2)
+            float a = m.AxleFromFront - m.Length / 2f;
+            float comZ = a / (1f - 1f / (1f - Layout.Tongue));
+            preset.Drawbar = -comZ - m.Length / 2f;
+            return preset;
+        }
     }
 
-    // The wheels the trailer takes from the towing car: its rear wheels' radius, tyre width and track, and its
-    // suspension travel capped at 0.35 m
+    // The trailer's wheels (spec 12): one set on every car – radius 0.40 m, travel 0.35 m – drawn as the towing car's own
+    // rear wheel scaled as a whole to that radius (Scale = 0.40 / the car's), its tyre's width scaled with it
     internal sealed class WheelSpec
     {
-        public const float MaxTravel = 0.35f;
-        public float Radius, Width, Travel, Track;
+        public const float Standard = 0.40f, MaxTravel = 0.35f;
+        public float Radius, Width, Travel, Track, CarRadius, CarWidth, Scale;
         public string From;
     }
 
@@ -39,12 +61,14 @@ namespace TestTrailer
         public const float TandemSpacing = 0.9f, TandemGap = 0.12f, TyreGap = 0.04f, Tongue = 0.11f;
         public const float BarHalf = 0.05f, HeadLength = 0.2f, Chamfer = 0.25f;
         public const float Springs = 0.15f, Frame = 0.12f, FenderGap = 0.13f, MaxStep = 0.6f;
+        // The lift (spec 12): the hangers 0.10 m (4") longer when the Z's step would be over 0.40 m
+        public const float LiftHeight = 0.10f, LiftAt = 0.40f;
         public const float ChassisShare = 0.20f, ShellShare = 0.15f, LoadShare = 0.65f;
 
         public readonly Preset Preset;
         public readonly WheelSpec Wheels;
         public readonly float Ground, AxleY, RailBottom, LineY, FloorY, Step, StepStart, FenderY, Front, Back, AxleZ, WheelX, HubY, RailX;
-        public readonly float ComTarget, LoadHeight, Spacing;
+        public readonly float ComTarget, LoadHeight, Spacing, Lift, UnliftedStep;
         public readonly float[] Axles;
         public readonly N3 BodyCentre, BodySize, Com;
         public readonly bool Chamfered;
@@ -55,11 +79,13 @@ namespace TestTrailer
             Wheels = wheels;
             Ground = ground;
             HubY = AxleY = ground + wheels.Radius;
-            RailBottom = AxleY + Springs;
+            // The Z: from the drawbar's line up (or down) to the coupling's height (0) at 45°, its run |step|, beginning
+            // 0.2 + |step| before the coupling. A step over 0.40 m up to the ball lifts the frame on 0.10 m longer hangers.
+            UnliftedStep = 0f - (AxleY + Springs + Frame / 2f);
+            Lift = UnliftedStep > LiftAt ? LiftHeight : 0f;
+            RailBottom = AxleY + Springs + Lift;
             LineY = RailBottom + Frame / 2f;
             FloorY = RailBottom + Frame;
-            // The Z: from the drawbar's line up (or down) to the coupling's height (0) at 45°, its run |step|, beginning
-            // 0.2 + |step| before the coupling
             Step = 0f - LineY;
             StepStart = -(HeadLength + Math.Abs(Step));
             FenderY = AxleY + wheels.Radius + FenderGap;
@@ -77,15 +103,21 @@ namespace TestTrailer
             Com = new N3(0f, comY, BodyCentre.Z);
             // tongue share = (com z - axle z) / (0 - axle z)  =>  axle z = com z / (1 - share)
             AxleZ = Com.Z / (1f - Tongue);
-            // A tandem's axles at least 0.9 m apart, further for big wheels: the car's wheel's diameter and 0.12 m between
-            // the tyres (the Mammoth's 1.04 m wheels overlapped by 0.14 m at 0.9)
+            // A tandem's axles the wheel's diameter and 0.12 m between the tyres apart, at least 0.9 m (0.92 with the 0.40 m
+            // wheels of spec 12)
             Spacing = Math.Max(TandemSpacing, 2f * wheels.Radius + TandemGap);
             Axles = preset.Axles > 1 ? new[] { AxleZ + Spacing / 2f, AxleZ - Spacing / 2f } : new[] { AxleZ };
-            float beside = preset.Width / 2f + TyreGap + wheels.Width / 2f;
-            // L: the car's own track, or the body's width and a tyre, whichever is wider
-            WheelX = preset.Axles > 1 ? Math.Max(beside, Math.Max(wheels.Track, preset.Width + wheels.Width) / 2f) : beside;
+            // Beside the body by the tyre's width, on every car the same (spec 12: L no longer widens to the car's track)
+            WheelX = preset.Width / 2f + TyreGap + wheels.Width / 2f;
             RailX = preset.Width / 2f - 0.2f;
             Chamfered = preset.Name != "S";
+            // A model's wheels go under its arches, its rails inside its wheel wells; it has no chamfers of ours
+            if (preset.Model != null)
+            {
+                WheelX = preset.Model.WheelX;
+                RailX = preset.Model.RailX;
+                Chamfered = false;
+            }
         }
 
         // The lower edges' chamfer (M and L), and where the frame's rails end: square, as long as the body's flat bottom
@@ -112,9 +144,9 @@ namespace TestTrailer
     {
         public static readonly Preset[] Presets =
         {
-            new() { Name = "S", Length = 2.4f, Width = 1.4f, Height = 0.9f, Drawbar = 1.2f, Axles = 1, Radius = 0.35f, Mass = 350f },
-            new() { Name = "M", Length = 3.6f, Width = 1.8f, Height = 1.6f, Drawbar = 1.35f, Axles = 1, Radius = 0.38f, Mass = 800f },
-            new() { Name = "L", Length = 4.6f, Width = 2.0f, Height = 2.2f, Drawbar = 1.5f, Axles = 2, Radius = 0.40f, Mass = 1400f },
+            new() { Name = "S", Length = 2.4f, Width = 1.4f, Height = 0.9f, Drawbar = 1.2f, Axles = 1, Mass = 350f },
+            Preset.Modelled(new() { Name = "M", Length = 3.6f, Width = 1.8f, Height = 1.6f, Drawbar = 1.35f, Axles = 1, Mass = 800f }, "M"),
+            new() { Name = "L", Length = 4.6f, Width = 2.0f, Height = 2.2f, Drawbar = 1.5f, Axles = 2, Mass = 1400f },
         };
 
         private static readonly int[] Textures =
@@ -147,6 +179,59 @@ namespace TestTrailer
             };
         }
 
+        // An author's model as one mesh, a submesh per colour, in the model's own space (the body's bottom and front at 0)
+        public static Mesh ModelMesh(TrailerModel model)
+        {
+            var mesh = new Mesh { name = "TestTrailer model " + model.Name };
+            mesh.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            if (model.Positions.Length > 65000)
+                mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            var points = new Vector3[model.Positions.Length];
+            var normals = new Vector3[model.Positions.Length];
+            for (int i = 0; i < points.Length; i++)
+            {
+                var p = model.Positions[i];
+                var n = model.Normals[i];
+                points[i] = new Vector3(p.X, p.Y, p.Z);
+                normals[i] = new Vector3(n.X, n.Y, n.Z);
+            }
+            mesh.vertices = points;
+            mesh.normals = normals;
+            mesh.subMeshCount = model.Parts.Count;
+            for (int i = 0; i < model.Parts.Count; i++)
+                mesh.SetTriangles(model.Parts[i].indices, i);
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        // The model's collider mesh (its body, roof and front box) moved to where the model stands in the trailer's space
+        public static Mesh ModelHull(TrailerModel model, N3 at)
+        {
+            var mesh = new Mesh { name = "TestTrailer model hull " + model.Name };
+            mesh.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            var points = new Vector3[model.ColliderPositions.Length];
+            for (int i = 0; i < points.Length; i++)
+            {
+                var p = model.ColliderPositions[i] + at;
+                points[i] = new Vector3(p.X, p.Y, p.Z);
+            }
+            mesh.vertices = points;
+            mesh.SetTriangles(model.ColliderIndices, 0);
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        // A copy of the trailer's material in one of the model's colours (sRGB, as the author painted it)
+        public static Material Tinted(Material source, float r, float g, float b, string name)
+        {
+            var material = new Material(source) { name = "TestTrailer " + name };
+            var colour = new Color(r, g, b, 1f);
+            for (int i = 0; i < Colours.Length; i++)
+                if (material.HasProperty(Colours[i]))
+                    material.SetColor(Colours[i], colour);
+            return material;
+        }
+
         // The collider's mesh: the chamfered body exactly (a convex prism), for a convex MeshCollider (spec 10)
         public static Mesh Hull(Layout l)
         {
@@ -159,7 +244,9 @@ namespace TestTrailer
         {
             var shape = new Shape();
             var p = l.Preset;
-            shape.Prism(Profile(l), p.Width / 2f);
+            // The box, or nothing here when an author's model is the body (drawn as its own part, Look.ModelMesh)
+            if (p.Model == null)
+                shape.Prism(Profile(l), p.Width / 2f);
             // The frame: two rails under the body's flat bottom (spec 10: as long as it, square ends), 0.12 m deep, a cross
             // member at each end
             float railY = l.RailBottom + Layout.Frame / 2f;
@@ -187,7 +274,9 @@ namespace TestTrailer
                     foreach (float end in new[] { -AxleLook.SpringHalf, AxleLook.SpringHalf })
                         shape.Box(new N3(side * l.RailX, (l.RailBottom + l.AxleY + AxleLook.SpringTop) / 2f, z + end),
                             new N3(0.025f, Math.Max(0.005f, (l.RailBottom - l.AxleY - AxleLook.SpringTop) / 2f), 0.025f));
-            // Fenders 0.13 m over the wheels' static top, joined to the body
+            // Fenders 0.13 m over the wheels' static top, joined to the body (a model has its own arches)
+            if (p.Model != null)
+                return shape;
             var w = l.Wheels;
             float first = l.Axles[0] + w.Radius + 0.05f, last = l.Axles[l.Axles.Length - 1] - w.Radius - 0.05f;
             foreach (float side in new[] { -1f, 1f })

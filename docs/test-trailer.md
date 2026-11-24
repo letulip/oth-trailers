@@ -488,3 +488,20 @@ telemetry, a second the stop acted: «roll stop x N·m at most, n steps».
 
 **The run** (the spec's): M and L on the Mammoth along the slope that turned 0.0.4's M over and across ruts; one wheel
 into a hole and over a rock at walking pace; crests and the end of a ramp. Send `Latest.log`.
+
+## 12. One wheel set (0.0.7)
+
+[`specs/12-one-wheel-set.md`](specs/12-one-wheel-set.md). The owner chose one wheel for every car instead of the car's
+own size (24 November 2026), the car's look kept: «сороковые колеса, диски переиспользуем… от самого тягача».
+
+- **The wheel:** radius 0.40 m, travel 0.35 m on every car (`WheelSpec.Standard`, `MaxTravel`); the copy of the car's
+  rear wheel scaled as a whole by 0.40 / its radius (the Mammoth 0.77, the Protector 0.95), the tyre's width for the
+  rays with it; the grip the car's tyre's.
+- **The height:** the floor 0.67 m over the ground, the drawbar's line 0.61 m, whatever the car. The Z's step: the
+  Protector 0.18 m, the Mammoth 0.50 m → over `LiftAt` 0.40, so the hangers grow by `LiftHeight` 0.10 m: floor 0.77,
+  step 0.40. A ball up to 1.31 m over the ground hitches.
+- **Tandem:** 0.92 m apart on every car; S and L beside the body by the tyre (L no longer at the car's track).
+- **In the author's arches** (M): the wheel's top 0.13 m over the floor, 0.03 m lifted, under the arch's 0.36 m
+  (`tools/model_fit.py`, `preview/model/fit_M_0.0.7.png`).
+- **Log:** «wheels: one set, radius 0.400 m, from the car's rear wheels, scaled (… scaled by k)», and in the size line
+  «+ lift 0.10» with «lift 4": the step would be … m, over 0.4» or «no lift».
